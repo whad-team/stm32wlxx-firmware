@@ -1,9 +1,9 @@
 #define variables
 
 OPENCM3_DIR := ./libopencm3
+WHAD_DIR 	:= ./whad-lib
 LIBDIR       = $(OPENCM3_DIR)/lib
 LIBNAMEROOT  = opencm3_
-#DEVICE       = stm32f411re
 DEVICE	     = stm32wl
 
 DEV_DATAFILE = $(OPENCM3_DIR)/ld/devices.data
@@ -43,10 +43,12 @@ else
 C_FLAGS	     = -Os -mthumb -mcpu=$(DEV_CPU) $(DEV_CFLAGS) -m$(DEV_FLOATTYPE)-float -mfpu=$(DEV_FPUTYPE) -Wall
 endif
 
-INC_FLAGS    += -I$(OPENCM3_DIR)/include
+
+INC_FLAGS    += -I$(OPENCM3_DIR)/include -I$(WHAD_DIR)/inc -I$(WHAD_DIR)/nanopb -I$(WHAD_DIR)
 
 #for the linking
-LD_FLAGS     += -L$(OPENCM3_DIR)/lib -lc -lgcc -lnosys -l$(LIBNAME) -T$(DEV_LDFILE) -nostartfiles --static 
+LD_FLAGS     += -L$(OPENCM3_DIR)/lib -lc -lgcc -lnosys -l$(LIBNAME) -T$(DEV_LDFILE) -nostartfiles --static
+LD_FLAGS     += -L$(WHAD_DIR)/lib -lwhad
 LD_FLAGS     += -u _printf_float
 
 PROJECT      = main
@@ -61,6 +63,7 @@ flash : $(PROJECT).bin
 
 lib:
 	$(MAKE) -C $(OPENCM3_DIR) DEVICE=$(DEVICE) TARGETS=stm32/$(DEV_FAMILYCODE) -j `nproc`
+	$(MAKE) -C $(WHAD_DIR) ARCH_ARM=1 all
 
 clean :
 	@rm *.bin *.hex *.elf *.o *.ld lora/*.o
