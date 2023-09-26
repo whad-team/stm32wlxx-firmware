@@ -52,6 +52,7 @@ LD_FLAGS     += -L$(WHAD_DIR)/lib -lwhad
 LD_FLAGS     += -u _printf_float
 
 PROJECT      = main
+ADAPTER		 = adapter
 
 # tells make that these don't produce a file
 .PHONY: clean flash lib $(PROJECT)
@@ -81,14 +82,17 @@ $(DEV_LDFILE):
 %.hex: %.elf
 	$(OBJCOPY) -Oihex $(PROJECT).elf $(PROJECT).hex
 
-$(PROJECT).elf : lib $(PROJECT).o $(DEV_LDFILE) lora/subghz.o
-	$(CC) $(C_FLAGS) -o $(PROJECT).elf $(PROJECT).o lora/subghz.o $(LD_FLAGS)
+$(PROJECT).elf : lib $(PROJECT).o $(ADAPTER).o $(DEV_LDFILE) lora/subghz.o
+	$(CC) $(C_FLAGS) -o $(PROJECT).elf $(PROJECT).o $(ADAPTER).o lora/subghz.o $(LD_FLAGS)
 
 lora/subghz.o: lora/subghz.c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o lora/subghz.o lora/subghz.c
 
 $(PROJECT).o : $(PROJECT).c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(PROJECT).o $(PROJECT).c
+
+$(ADAPTER).o : $(ADAPTER).c
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(ADAPTER).o $(ADAPTER).c
 
 makefiledebug:
 	@echo "DEV_FAMILY='"$(DEV_FAMILY)"'"

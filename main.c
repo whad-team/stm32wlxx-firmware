@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <string.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/exti.h>
@@ -30,6 +31,7 @@
 #include <whad.h>
 
 #include "lora/subghz.h"
+#include "adapter.h"
 
 
 #define RF_SW_CTRL1_PIN                          GPIO4
@@ -49,6 +51,15 @@
 
 #define USART_CONSOLE USART1  /* PB6/7 , af7 */
 
+static Message message;
+
+void uart_send_buffer_sync(uint8_t *p_data, int size);
+
+static whad_transport_cfg_t transport_config = {
+  .max_txbuf_size = 64,
+  .pfn_data_send_buffer = uart_send_buffer_sync,
+  .pfn_message_cb = NULL
+};
 
 /* Setup APB1 frequency to 24MHz */
 static void clock_setup_bis(void)
@@ -77,73 +88,159 @@ static void clock_setup_bis(void)
   rcc_periph_clock_enable(RCC_GPIOA);
 	rcc_periph_clock_enable(RCC_GPIOB);
 
-	/* Enable clocks for peripherals we need */
-	rcc_periph_clock_enable(RCC_USART1);
 }
 
 static void usart_setup(void)
 {
-	/* Setup GPIO pins for USART1 transmit. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6);
+    /* Enable clocks for peripherals we need */
+    rcc_periph_clock_enable(RCC_USART1);
 
-	/* Setup USART1 TX pin as alternate function. */
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO6);
-	usart_set_baudrate(USART_CONSOLE, 115200);
-	usart_set_databits(USART_CONSOLE, 8);
-	usart_set_stopbits(USART_CONSOLE, USART_STOPBITS_1);
-	usart_set_mode(USART_CONSOLE, USART_MODE_TX);
-	usart_set_parity(USART_CONSOLE, USART_PARITY_NONE);
-	usart_set_flow_control(USART_CONSOLE, USART_FLOWCONTROL_NONE);
+    /* Enable USART1 IRQ. */
+    nvic_set_priority(NVIC_USART1_IRQ, 0);
+    nvic_enable_irq(NVIC_USART1_IRQ);
 
-	/* Enable USART Receive interrupt. */
-	USART_CR1(USART_CONSOLE) |= USART_CR1_RXNEIE;
+    /* Setup GPIO pins for USART1 transmit. */
+    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6);
+    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO7);
 
-	/* Finally enable the USART. */
-	usart_enable(USART_CONSOLE);
+    /* Setup USART1 TX pin as alternate function. */
+    gpio_set_af(GPIOB, GPIO_AF7, GPIO6);
+
+    /* Setup USART1 RX pin as alternate function. */
+    gpio_set_af(GPIOB, GPIO_AF7, GPIO7);
+
+    usart_set_baudrate(USART_CONSOLE, 115200);
+    usart_set_databits(USART_CONSOLE, 8);
+    usart_set_stopbits(USART_CONSOLE, USART_STOPBITS_1);
+    usart_set_mode(USART_CONSOLE, USART_MODE_TX_RX);
+    usart_set_parity(USART_CONSOLE, USART_PARITY_NONE);
+    usart_set_flow_control(USART_CONSOLE, USART_FLOWCONTROL_NONE);
+
+    /* Enable USART Receive interrupt. */
+    usart_enable_rx_interrupt(USART_CONSOLE);
+
+    /* Finally enable the USART. */
+    usart_enable(USART_CONSOLE);    
 }
 
 void usart1_isr(void)
 {
   static uint8_t data = 'A';
-  
-  /* Check if we were called because of RXNE. */
+
+
+	/* Did we receive a byte ? */
 	if (((USART_CR1(USART_CONSOLE) & USART_CR1_RXNEIE) != 0) &&
-	    ((USART_SR(USART_CONSOLE) & USART_SR_RXNE) != 0)) {
+	    ((USART_ISR(USART_CONSOLE) & USART_ISR_RXNE) != 0)) {
 
-		/* Retrieve the data from the peripheral. */
-		data = usart_recv(USART_CONSOLE);
+        gpio_toggle(GPIOB, GPIO9);
 
-		/* Enable transmit interrupt so it sends back the data. */
-		USART_CR1(USART_CONSOLE) |= USART_CR1_TXEIE;
-	}
+        /* Read byte */
+        data = usart_recv(USART_CONSOLE);
+        
+        /* Forward received byte to whad library. */
+        whad_transport_data_received(&data, 1);
+  }
 
-	/* Check if we were called because of TXE. */
+#if 0
+  /* Check if we were called because of TXE. */
 	if (((USART_CR1(USART_CONSOLE) & USART_CR1_TXEIE) != 0) &&
-	    ((USART_SR(USART_CONSOLE) & USART_SR_TXE) != 0)) {
+	    ((USART_ISR(USART_CONSOLE) & USART_ISR_TXE) != 0)) {
 
 		/* Put data into the transmit register. */
 		usart_send(USART_CONSOLE, data);
 
 		/* Disable the TXE interrupt as we don't need it anymore. */
-		USART_CR1(USART_CONSOLE) &= ~USART_CR1_TXEIE;
+		usart_disable_tx_interrupt(USART_CONSOLE);
 	}
+#endif  
+}
+
+void uart_send_buffer_sync(uint8_t *p_data, int size)
+{
+  int i;
+  
+  for (i=0; i<size; i++)
+  {
+    usart_send_blocking(USART_CONSOLE, p_data[i]);
+  }
+
+  /* Notify whad transport that we sent all the data. */
+  whad_transport_data_sent();
+}
+
+
+void print_dbg(char *psz_debug)
+{
+  for (int i=0; i<strlen(psz_debug); i++)
+    usart_send_blocking(USART_CONSOLE, psz_debug[i]);
+}
+
+void print_reg16_hex(char *prefix, uint16_t value)
+{
+  int i;
+
+  char digits[] = "0123456789abcdef";
+  char digit[4];
+  digit[0] = digits[(value & 0xf000) >> 12];
+  digit[1] = digits[(value & 0x0f00) >> 8];
+  digit[2] = digits[(value & 0x00f0) >> 4];
+  digit[3] = digits[(value & 0x000f)];
+  for (i=0; i<strlen(prefix); i++)
+    usart_send_blocking(USART_CONSOLE, prefix[i]);
+  usart_send_blocking(USART_CONSOLE, '=');
+  usart_send_blocking(USART_CONSOLE, digit[0]);
+  usart_send_blocking(USART_CONSOLE, digit[1]);
+  usart_send_blocking(USART_CONSOLE, digit[2]);
+  usart_send_blocking(USART_CONSOLE, digit[3]);
+  usart_send_blocking(USART_CONSOLE, '\r');
+  usart_send_blocking(USART_CONSOLE, '\n');
 }
 
 int main(void)
 {
-  Message msg;
-
   /* Setup clock & UART */
   clock_setup_bis();
   usart_setup();
 
+  /* LEDs */
+  gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+  gpio_clear(GPIOB, GPIO15);
+  gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
+  gpio_clear(GPIOB, GPIO9);
+
+  /* Initialize WHAD layer. */
+  whad_init(&transport_config);
+
   /* Initialize SUBGHZ. */
   subghz_init();
 
-	while (1) {
-    /* Process incoming messages. */
+  /* Initialize adapter. */
+  adapter_init();
 
-	}
+  //whad_transport_send((uint8_t *)"This is a test\r\n", 16);
+  gpio_set(GPIOB, GPIO15);
+  gpio_set(GPIOB, GPIO9);
+
+  //print_dbg("OK\r\n");
+
+  while (1) {
+    /* Monitor async rx */
+    if(whad_get_message(&message) == WHAD_SUCCESS)
+    {
+      //print_dbg("Message decoded\r\n");
+      dispatch_message(&message);
+    }
+    /*
+    else
+    {
+      print_dbg("Error while decoding\r\n");
+    }
+    */
+
+    /* Send pending data to UART. */
+    whad_transport_send_pending();
+  }
 
 	return 0;
 }
+

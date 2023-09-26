@@ -9,9 +9,6 @@
 
 #include "subghz.h"
 
-extern void print_reg_hex(char *prefix, uint8_t value);
-extern void print_reg16_hex(char *prefix, uint16_t value);
-
 #define SUBGHZ_NSS_LOOP_TIME ((24000000 * 24U) >> 16U)
 #define RF_SW_CTRL1_PIN GPIO4
 #define RF_SW_CTRL1_GPIO_PORT GPIOA
@@ -1212,7 +1209,6 @@ subghz_result_t subghz_reset_stats(void)
 subghz_result_t subghz_config_dio_irq(uint16_t irq_mask, uint16_t irq1_mask,
                                       uint16_t irq2_mask, uint16_t irq3_mask)
 {
-  subghz_result_t res;
   uint8_t params[] = {
       (irq_mask >> 8) & 0xff,
       (irq_mask >> 0) & 0xff,
@@ -1224,8 +1220,7 @@ subghz_result_t subghz_config_dio_irq(uint16_t irq_mask, uint16_t irq1_mask,
       (irq3_mask >> 0) & 0xff};
 
   /* Send command. */
-  res = subghz_write_command(SUBGHZ_CFG_DIO_IRQ, params, 8);
-  print_reg_hex("dio_irq_res", res);
+  subghz_write_command(SUBGHZ_CFG_DIO_IRQ, params, 8);
 
   /* Always success. */
   return (0x06 << 1);
