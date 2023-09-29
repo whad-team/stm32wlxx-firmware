@@ -341,8 +341,8 @@ typedef enum {
 
 /* LoRa packet parameters */
 typedef enum {
-  SUBGHZ_PKT_LORA_FIXED_LENGTH,
-  SUBGHZ_PKT_LORA_VAR_LENGTH
+  SUBGHZ_PKT_LORA_VAR_LENGTH = 0,
+  SUBGHZ_PKT_LORA_FIXED_LENGTH = 1
 } subghz_lora_packet_hdr_t;
 
 /* Rx Buffer status. */
@@ -564,6 +564,7 @@ subghz_result_t subghz_write_buffer(uint8_t offset, uint8_t *p_data, int length)
 subghz_result_t subghz_read_buffer(uint8_t offset, uint8_t *p_data, int length);
 
 /* SUBGHZ Commands API */
+uint32_t subghz_get_errcode(void);
 subghz_result_t subghz_get_status(void);
 subghz_result_t subghz_get_error(subghz_err_t *error);
 subghz_result_t subghz_set_tcxo_mode(subghz_tcxo_trim_t trim, uint32_t timeout);

@@ -84,10 +84,10 @@ static void clock_setup_bis(void)
   rcc_osc_on(RCC_HSE);
   rcc_wait_for_osc_ready(RCC_HSE);
 
-	/* Enable clocks for the ports we need */
+  /* Enable clocks for the ports we need */
   rcc_periph_clock_enable(RCC_GPIOA);
-	rcc_periph_clock_enable(RCC_GPIOB);
-
+  rcc_periph_clock_enable(RCC_GPIOB);
+  rcc_periph_clock_enable(RCC_GPIOC);
 }
 
 static void usart_setup(void)
@@ -210,9 +210,6 @@ int main(void)
 
   /* Initialize WHAD layer. */
   whad_init(&transport_config);
-
-  /* Initialize SUBGHZ. */
-  subghz_init();
 
   /* Initialize adapter. */
   adapter_init();
