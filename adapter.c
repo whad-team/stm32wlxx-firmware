@@ -11,6 +11,7 @@ static DeviceCapability g_adapter_cap[] = {
 static uint64_t g_phy_supported_commands = (
     (1 << phy_PhyCommand_GetSupportedFrequencies) |
     (1 << phy_PhyCommand_SetLoRaModulation) |
+    (1 << phy_PhyCommand_SetFSKModulation) |
     (1 << phy_PhyCommand_SetFrequency) |
     (1 << phy_PhyCommand_SetSyncWord) |
     (1 << phy_PhyCommand_Send) |
@@ -45,7 +46,12 @@ static adapter_t g_adapter;
  * Subghz callbacks
  **************************************/
 
-/* handle RF switch config. */
+/**
+ * @brief   Handle RF switching (TX/RX)
+ * 
+ * @param   tx  True if TX should be enabled, False if RX should be enabled.
+ */
+
 static void adapter_on_rf_switch_cb(bool tx)
 {
     gpio_mode_setup(RF_SW_CTRL1_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, RF_SW_CTRL1_PIN);
@@ -63,6 +69,14 @@ static void adapter_on_rf_switch_cb(bool tx)
         gpio_clear(RF_SW_CTRL2_GPIO_PORT, RF_SW_CTRL2_PIN);
     }
 }
+
+
+/**
+ * @brief   Handle packet reception.
+ * 
+ * @param   offset  Offset in the reception buffer
+ * @param   length  Packet length in bytes
+ */
 
 static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
 {
@@ -111,6 +125,11 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
         whad_send_message(&msg);
     }
 }
+
+
+/**
+ * @brief   Handle packet sent.
+ */
 
 static void adapter_on_pkt_sent(void)
 {
@@ -619,6 +638,34 @@ void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
 
 
 /**
+ * @brief   Handle FSK modulation parameters configuration
+ * 
+ * @param   cmd     `SetLoRaModulationCmd` message
+ * 
+ * Save the provided LoRa configuration to use it only when the
+ * adapter is started.
+ */
+
+void adapter_on_fsk_modulation(phy_SetFSKModulationCmd *cmd)
+{
+    Message cmd_result;
+
+    /* Update FSK configuration. */
+    adapter_set_deviation(cmd->deviation);
+    g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW11;
+    g_adapter.fsk_config.addr_comp = SUBGHZ_ADDR_COMP_DISABLED;
+
+    /* TODO: add support for bandwidth, bitrate, */
+
+    /* Switch adapter into LoRa mode. */
+    g_adapter.mode = FSK_MODE;
+
+    /* Success. */
+    whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+    whad_send_message(&cmd_result);
+}
+
+/**
  * @brief   Handle PHY frequency configuration
  * 
  * @param   cmd     `SetFrequencyCmd` message
@@ -790,6 +837,15 @@ void dispatch_message(Message *message)
                     {
                         adapter_on_lora_modulation(
                             &message->msg.phy.msg.mod_lora
+                        );
+                    }
+                    break;
+
+                    /* Configure adapter for FSK modulation. */
+                    case phy_Message_mod_fsk_tag:
+                    {
+                        adapter_on_fsk_modulation(
+                            &message->msg.phy.msg.mod_fsk
                         );
                     }
                     break;
