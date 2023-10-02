@@ -1,18 +1,5 @@
 #include "adapter.h"
 
-extern void print_dbg(char *psz_debug);
-
-typedef enum {
-    STOPPED = 0,
-    STARTED
-} adapter_state_t;
-
-typedef struct {
-    adapter_state_t state;
-    uint16_t sync_word;
-    subghz_lora_config_t config;
-} adapter_t;
-
 /**
  * Adapter WHAD capabilities and domains
  */
@@ -37,6 +24,9 @@ const phy_SupportedFrequencyRanges_FrequencyRange g_phy_supported_freq_ranges[] 
 };
 const int g_phy_supported_ranges_nb = 1;
 
+/**
+ * RF-related callbacks.
+ **/
 static void adapter_on_rf_switch_cb(bool tx);
 static void adapter_on_pkt_received(uint8_t offset, uint8_t length);
 static void adapter_on_pkt_sent(void);
@@ -48,8 +38,12 @@ static subghz_callbacks_t my_callbacks = {
     .pfn_on_timeout = adapter_on_pkt_sent,
 };
 
-
+/* Main adapter structure. */
 static adapter_t g_adapter;
+
+/**************************************
+ * Subghz callbacks
+ **************************************/
 
 /* handle RF switch config. */
 static void adapter_on_rf_switch_cb(bool tx)
@@ -76,6 +70,7 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
     uint8_t rxbuf[256];
     int8_t rssi = 0;
     int8_t rssi_inst = 0;
+    uint32_t freq;
 
     /* Read instantaneous RSSI. */
     if (SUBGHZ_CMD_SUCCESS(subghz_get_rssi_inst((uint8_t *)&rssi)))
@@ -95,10 +90,19 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
         if (g_adapter.state == STOPPED)
             return;        
 
+        if (g_adapter.mode == LORA_MODE)
+        {
+            freq = g_adapter.lora_config.freq;
+        }
+        else
+        {
+            freq = g_adapter.fsk_config.freq;
+        }
+
         /* Report packet. */
         whad_phy_packet_received(
             &msg,
-            g_adapter.config.freq,
+            freq,
             rssi_inst,
             0,
             rxbuf,
@@ -115,8 +119,14 @@ static void adapter_on_pkt_sent(void)
 }
 
 
+/**************************************
+ * Adapter getters/setters
+ **************************************/
+
 /**
- * Adapter routines
+ * @brief Set LoRa spreading factor
+ * 
+ * @param   spreading_factor    Spreading factor to use (SF7 -> SF12)
  */
 
 void adapter_set_spreading_factor(phy_LoRaSpreadingFactor spreading_factor)
@@ -124,105 +134,182 @@ void adapter_set_spreading_factor(phy_LoRaSpreadingFactor spreading_factor)
     switch (spreading_factor)
     {
         case phy_LoRaSpreadingFactor_SF8:
-            g_adapter.config.sf = SUBGHZ_LORA_SF8;
+            g_adapter.lora_config.sf = SUBGHZ_LORA_SF8;
             break;
 
         case phy_LoRaSpreadingFactor_SF9:
-            g_adapter.config.sf = SUBGHZ_LORA_SF9;
+            g_adapter.lora_config.sf = SUBGHZ_LORA_SF9;
             break;
 
         case phy_LoRaSpreadingFactor_SF10:
-            g_adapter.config.sf = SUBGHZ_LORA_SF10;
+            g_adapter.lora_config.sf = SUBGHZ_LORA_SF10;
             break;
 
         case phy_LoRaSpreadingFactor_SF11:
-            g_adapter.config.sf = SUBGHZ_LORA_SF11;
+            g_adapter.lora_config.sf = SUBGHZ_LORA_SF11;
             break;
 
         case phy_LoRaSpreadingFactor_SF12:
-            g_adapter.config.sf = SUBGHZ_LORA_SF12;
+            g_adapter.lora_config.sf = SUBGHZ_LORA_SF12;
             break;
 
         default:
         case phy_LoRaSpreadingFactor_SF7:
-            g_adapter.config.sf = SUBGHZ_LORA_SF7;
+            g_adapter.lora_config.sf = SUBGHZ_LORA_SF7;
             break;
     }
 }
+
+
+/**
+ * @brief Set LoRa coding rate
+ * 
+ * @param   coding_rate     Coding rate to use (4/5, 4/6, 4/7 or 4/8)
+ */
 
 void adapter_set_coding_rate(phy_LoRaCodingRate coding_rate)
 {
     switch (coding_rate)
     {
         case phy_LoRaCodingRate_CR45:
-            g_adapter.config.cr = SUBGHZ_LORA_CR_45;
+            g_adapter.lora_config.cr = SUBGHZ_LORA_CR_45;
             break;
 
         case phy_LoRaCodingRate_CR46:
-            g_adapter.config.cr = SUBGHZ_LORA_CR_46;
+            g_adapter.lora_config.cr = SUBGHZ_LORA_CR_46;
             break;
 
         case phy_LoRaCodingRate_CR47:
-            g_adapter.config.cr = SUBGHZ_LORA_CR_47;
+            g_adapter.lora_config.cr = SUBGHZ_LORA_CR_47;
             break;
 
         case phy_LoRaCodingRate_CR48:
-            g_adapter.config.cr = SUBGHZ_LORA_CR_48;
+            g_adapter.lora_config.cr = SUBGHZ_LORA_CR_48;
             break;
     }
 }
+
+/**
+ * @brief Set LoRa modulation bandwidth
+ * 
+ * @param   bandwidth     Bandwidth to use (125 kHz, 250 kHz or 500 kHz)
+ */
 
 void adapter_set_bandwidth(phy_LoRaBandwidth bandwidth)
 {
     switch (bandwidth)
     {
         case phy_LoRaBandwidth_BW125:
-            g_adapter.config.bw = SUBGHZ_LORA_BW125;
+            g_adapter.lora_config.bw = SUBGHZ_LORA_BW125;
             break;
 
         case phy_LoRaBandwidth_BW250:
-            g_adapter.config.bw = SUBGHZ_LORA_BW250;
+            g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;
             break;
 
         default:
         case phy_LoRaBandwidth_BW500:
-            g_adapter.config.bw = SUBGHZ_LORA_BW500;
+            g_adapter.lora_config.bw = SUBGHZ_LORA_BW500;
             break;
     }
 }
+
+
+/**
+ * @brief Set LoRa synchronization word
+ * 
+ * @param   u16_sync_word     16-bit synchronization word (specific to LoRa)
+ */
 
 void adapter_set_syncword(uint16_t u16_sync_word)
 {
     g_adapter.sync_word = u16_sync_word;
 }
 
+
+/**
+ * @brief Set adapter frequency
+ * 
+ * @param   freq    Frequency in Hz
+ */
+
 void adapter_set_freq(uint32_t freq)
 {
-    g_adapter.config.freq = freq;
+    if (g_adapter.mode == LORA_MODE)
+    {
+        g_adapter.lora_config.freq = freq;
+    }
+    else
+    {
+        g_adapter.fsk_config.freq = freq;
+    }
 }
+
+
+/**
+ * @brief Enable CRC (LoRa and FSK)
+ * 
+ * @param   enabled    True to enable CRC, False to disable
+ */
 
 void adapter_enable_crc(bool enabled)
 {
-    g_adapter.config.crc_enabled = enabled;
+    if (g_adapter.mode == LORA_MODE)
+    {
+        g_adapter.lora_config.crc_enabled = enabled;
+    }
+    else
+    {
+        g_adapter.fsk_config.crc = enabled;
+    }
 }
+
+
+/**
+ * @brief   Set preamble length (FSK and LoRa)
+ * 
+ * @param   preamble_length    Preamble length in symbols
+ */
 
 void adapter_set_preamble_length(uint16_t preamble_length)
 {
-    g_adapter.config.preamble_length = (preamble_length & 0xFFFF);
+    if (g_adapter.mode == LORA_MODE)
+    {
+        g_adapter.lora_config.preamble_length = (preamble_length & 0xFFFF);
+    }
+    else
+    {
+        g_adapter.fsk_config.preamble_length = (preamble_length & 0xFFFF);
+    }
 }
+
+
+/**
+ * @brief   Enable LoRa explicit mode (variable-length packets)
+ * 
+ * @param   enabled     Enabled if True, disabled otherwise.
+ */
 
 void adapter_enable_explicit_mode(bool enabled)
 {
     if (enabled)
     {
-        g_adapter.config.header_type = SUBGHZ_PKT_LORA_VAR_LENGTH;
+        g_adapter.lora_config.header_type = SUBGHZ_PKT_LORA_VAR_LENGTH;
     }
     else
     {
-        g_adapter.config.header_type = SUBGHZ_PKT_LORA_FIXED_LENGTH;
+        g_adapter.lora_config.header_type = SUBGHZ_PKT_LORA_FIXED_LENGTH;
     }
 }
 
+
+/**************************************
+ * Main adapter routines.
+ **************************************/
+
+/**
+ * @brief   Adapter initialization
+ */
 
 void adapter_init(void)
 {
@@ -244,31 +331,58 @@ void adapter_init(void)
     subghz_set_buffer_base_address(0, 0);
 
     /* Initialize LoRa adapter. */
-    g_adapter.config.freq = 865200000;
-    g_adapter.config.sf = SUBGHZ_LORA_SF7;                      /* Default spreading factor: SF7 */
-    g_adapter.config.bw = SUBGHZ_LORA_BW250;                    /* Default bandwidth: 250kHz */
-    g_adapter.config.cr = SUBGHZ_LORA_CR_48;                    /* Default coding rate: 4/8 */
-    g_adapter.config.payload_length = 40,                      /* Fixed payload length: 200 bytes. */
-    g_adapter.config.preamble_length = 12,                      /* Default preamble length: 12 symbols. */
-    g_adapter.config.header_type = SUBGHZ_PKT_LORA_VAR_LENGTH,  /* Explicit mode enabled. */
-    g_adapter.config.crc_enabled = false,                       /* CRC disabled by default. */
-    g_adapter.config.invert_iq = false,                         /* No IQ invert */
-    g_adapter.config.ldro = SUBGHZ_LORA_LDRO_DISABLED,          /* LDRO disabled */
-    g_adapter.config.pa_mode = SUBGHZ_PA_MODE_HP,               /* Power amplifier enabled */
-    g_adapter.config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
+    g_adapter.lora_config.freq = 865200000;
+    g_adapter.lora_config.sf = SUBGHZ_LORA_SF7;                      /* Default spreading factor: SF7 */
+    g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;                    /* Default bandwidth: 250kHz */
+    g_adapter.lora_config.cr = SUBGHZ_LORA_CR_48;                    /* Default coding rate: 4/8 */
+    g_adapter.lora_config.payload_length = 40,                      /* Fixed payload length: 200 bytes. */
+    g_adapter.lora_config.preamble_length = 12,                      /* Default preamble length: 12 symbols. */
+    g_adapter.lora_config.header_type = SUBGHZ_PKT_LORA_VAR_LENGTH,  /* Explicit mode enabled. */
+    g_adapter.lora_config.crc_enabled = false,                       /* CRC disabled by default. */
+    g_adapter.lora_config.invert_iq = false,                         /* No IQ invert */
+    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED,          /* LDRO disabled */
+    g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_HP;               /* Power amplifier enabled */
+    g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
+    /* Initialize FSK adapter. */
+    g_adapter.fsk_config.freq = 868000000;
+    g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW11;
+    g_adapter.fsk_config.freq_dev = 50000;
+    g_adapter.fsk_config.bit_rate = 1000000;
+    g_adapter.fsk_config.crc = false;
+    g_adapter.fsk_config.packet_type = SUBGHZ_PKT_FIXED_LENGTH;
+    g_adapter.fsk_config.pa_mode = SUBGHZ_PA_MODE_HP;
+    g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
+
+    /* Default mode is LoRa. */
+    g_adapter.mode = LORA_MODE;
+
+    /* Adapter is stopped by default. */
     g_adapter.state = STOPPED;
 }
 
+
+/**
+ * @brief   Start adapter (if configured)
+ */
+
 int adapter_start(void)
 {
-    /* Set 16-bit LoRa sync word. */
-    //subghz_set_syncword((uint8_t *)&g_adapter.sync_word, 2);
-    
-    /* Set transceiver in LoRa mode. */
-    if (subghz_lora_mode(&g_adapter.config) == SUBGHZ_ERROR)
+    if (g_adapter.mode == LORA_MODE)
     {
-        return 1;
+        /* Set transceiver in LoRa mode. */
+        if (subghz_lora_mode(&g_adapter.lora_config) == SUBGHZ_ERROR)
+        {
+            return 1;
+        }
+    }
+    else
+    {
+        /* Set transceiver in FSK mode. */
+        if (subghz_fsk_mode(&g_adapter.fsk_config) == SUBGHZ_ERROR)
+        {
+            return 1;
+        }
     }
 
     /* Start receiving (no timeout, continuous mode). */
@@ -284,6 +398,11 @@ int adapter_start(void)
     return 0;
 }
 
+
+/**
+ * @brief   Stop adapter
+ */
+
 void adapter_stop(void)
 {
     /* Put transceiver in standby mode. */
@@ -298,6 +417,10 @@ void adapter_stop(void)
  * WHAD Discovery messages callbacks
  */
 
+/**
+ * @brief   Handle discovery reset request
+ */
+
 void adapter_on_reset(void)
 {
     Message cmd_result;
@@ -308,6 +431,16 @@ void adapter_on_reset(void)
     whad_discovery_ready_resp(&cmd_result);
     whad_send_message(&cmd_result);
 }
+
+
+/**
+ * @brief   Handle discovery speed change
+ * 
+ * @param   speed   `SetTransportSpeed` parameters
+ * 
+ * With this adapter, there is no need to change the default speed as it
+ * cannot really go faster than 115200 bauds.
+ */
 
 void adapter_on_set_speed(discovery_SetTransportSpeed *speed)
 {
@@ -337,6 +470,16 @@ void adapter_on_set_speed(discovery_SetTransportSpeed *speed)
     #endif
 }
 
+
+/**
+ * @brief   Handle device discovery request
+ * 
+ * The adapter returns some information about itself, including supported protocol
+ * versions and firmware-related information.
+ * 
+ * @param   query   `DeviceInfoQuery` parameters
+ */
+
 void adapter_on_device_info_req(discovery_DeviceInfoQuery *query)
 {
     Message reply;
@@ -359,6 +502,15 @@ void adapter_on_device_info_req(discovery_DeviceInfoQuery *query)
     /* Send response. */
     whad_send_message(&reply);
 }
+
+
+/**
+ * @brief   Handle domain discovery request
+ * 
+ * The adapter returns some information about a supported domain.
+ * 
+ * @param   query   `DeviceDomainInfoQuery` parameters
+ */
 
 void adapter_on_domain_info_req(discovery_DeviceDomainInfoQuery *query)
 {
@@ -391,6 +543,13 @@ void adapter_on_domain_info_req(discovery_DeviceDomainInfoQuery *query)
     }
 }
 
+
+/**
+ * @brief   Unsupported message handling
+ * 
+ * Basically, we return an error.
+ */
+
 void adapter_on_unsupported(Message *message)
 {
     Message reply;
@@ -399,8 +558,19 @@ void adapter_on_unsupported(Message *message)
     whad_send_message(&reply);
 }
 
+
 /**
  * WHAD PHY messages callbacks
+ */
+
+
+/**
+ * @brief   Handle supported frequencies query.
+ * 
+ * @param   cmd     `GetSupportedFrequenciesCmd` message
+ * 
+ * Return the list of supported frequency ranges (min, max).
+ * Ranges are statically defined above.
  */
 
 void adapter_on_get_supported_freqs(phy_GetSupportedFrequenciesCmd *cmd)
@@ -417,6 +587,16 @@ void adapter_on_get_supported_freqs(phy_GetSupportedFrequenciesCmd *cmd)
     whad_send_message(&response);
 }
 
+
+/**
+ * @brief   Handle LoRa modulation parameters configuration
+ * 
+ * @param   cmd     `SetLoRaModulationCmd` message
+ * 
+ * Save the provided LoRa configuration to use it only when the
+ * adapter is started.
+ */
+
 void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
 {
     Message cmd_result;
@@ -429,10 +609,22 @@ void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
     adapter_enable_crc(cmd->enable_crc);
     adapter_enable_explicit_mode(cmd->explicit);
 
+    /* Switch adapter into LoRa mode. */
+    g_adapter.mode = LORA_MODE;
+
     /* Success. */
     whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
     whad_send_message(&cmd_result);
 }
+
+
+/**
+ * @brief   Handle PHY frequency configuration
+ * 
+ * @param   cmd     `SetFrequencyCmd` message
+ * 
+ * Save the frequency to use when adapter is started (for TX or RX operations).
+ */
 
 void adapter_on_set_freq(phy_SetFrequencyCmd *cmd)
 {
@@ -444,6 +636,15 @@ void adapter_on_set_freq(phy_SetFrequencyCmd *cmd)
     whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
     whad_send_message(&cmd_result);
 }
+
+
+/**
+ * @brief   Handle PHY synchronization word configuration
+ * 
+ * @param   cmd     `SetSyncWordCmd` message
+ * 
+ * Set the sub-Ghz synchronization word.
+ */
 
 void adapter_on_sync_word(phy_SetSyncWordCmd *cmd)
 {
@@ -464,6 +665,15 @@ void adapter_on_sync_word(phy_SetSyncWordCmd *cmd)
 
 }
 
+
+/**
+ * @brief   Handle adapter starting process
+ * 
+ * @param   cmd     `StartCmd` message
+ * 
+ * Start the RF PHY adapter depending on its configuration.
+ */
+
 void adapter_on_start(phy_StartCmd *cmd)
 {
     Message cmd_result;
@@ -482,6 +692,15 @@ void adapter_on_start(phy_StartCmd *cmd)
     }
 }
 
+
+/**
+ * @brief   Handle adapter stopping process
+ * 
+ * @param   cmd     `StopCmd` message
+ * 
+ * Stop the RF PHY adapter.
+ */
+
 void adapter_on_stop(phy_StopCmd *cmd)
 {
     Message cmd_result;
@@ -493,12 +712,26 @@ void adapter_on_stop(phy_StopCmd *cmd)
     whad_send_message(&cmd_result);
 }
 
+
+/**
+ * @brief   Handle packet sending
+ * 
+ * @param   cmd     `SendCmd` message
+ * 
+ * Send a packet using the configured PHY layer, if adapter is started.
+ */
+
 void adapter_on_send_packet(phy_SendCmd *cmd)
 {
     Message cmd_result;
 
-    /* Set frequency again. */
-    //subghz_set_rf_freq(g_adapter.config.freq);
+    if (g_adapter.state != STARTED)
+    {
+        /* Error. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+        whad_send_message(&cmd_result);
+        return;
+    }
 
     /* Send packet, go back to RX if timeout or when packet is successfully sent. */
     if (subghz_send_async(cmd->packet.bytes, cmd->packet.size, 0x9c400) == SUBGHZ_SUCCESS)
@@ -509,7 +742,7 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
     }
     else
     {
-        /* Success. */
+        /* Failure. */
         whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
         whad_send_message(&cmd_result);        
     }
@@ -519,6 +752,12 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
 /**
  * Whad message processing.
  **/
+
+/**
+ * @brief   Handle WHAD message
+ * 
+ * @param   message     WHAD message (protobuf) to process.
+ */
 
 void dispatch_message(Message *message)
 {
@@ -531,10 +770,13 @@ void dispatch_message(Message *message)
             }
             break;
 
+        /* PHY domain messages */
+
         case Message_phy_tag:
             {
                 switch(message->msg.phy.which_msg)
                 {
+                    /* List supported frequency ranges. */
                     case phy_Message_get_supported_freq_tag:
                     {
                         adapter_on_get_supported_freqs(
@@ -543,6 +785,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Configure adapter for LoRa modulation. */
                     case phy_Message_mod_lora_tag:
                     {
                         adapter_on_lora_modulation(
@@ -551,6 +794,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Set adapter frequency. */
                     case phy_Message_set_freq_tag:
                     {
                         adapter_on_set_freq(
@@ -559,6 +803,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Set adapter synchronization word. */
                     case phy_Message_sync_word_tag:
                     {
                         adapter_on_sync_word(
@@ -567,6 +812,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Start adapter. */
                     case phy_Message_start_tag:
                     {
                         adapter_on_start(
@@ -576,6 +822,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Stop adapter. */
                     case phy_Message_stop_tag:
                     {
                         adapter_on_stop(
@@ -584,6 +831,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Send packet through configured PHY. */
                     case phy_Message_send_tag:
                     {
                         adapter_on_send_packet(
@@ -592,6 +840,7 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Unsupported. */
                     default:
                         adapter_on_unsupported(message);
                         break;
@@ -599,20 +848,23 @@ void dispatch_message(Message *message)
             }
             break;
 
+
+        /* Device discovery messages. */
         case Message_discovery_tag:
             {
                 /* Dispatch discovery message. */
                 switch (message->msg.discovery.which_msg)
                 {
+                    /* Query device information. */
                     case discovery_Message_info_query_tag:
                     {
-                        /* Forward DeviceInfo query to adapter. */
                         adapter_on_device_info_req(
                             &message->msg.discovery.msg.info_query
                         );
                     }
                     break;
 
+                    /* Query device domain information. */
                     case discovery_Message_domain_query_tag:
                     {
                         adapter_on_domain_info_req(
@@ -621,21 +873,23 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Request a software reset. */
                     case discovery_Message_reset_query_tag:
                     {
                         /* Send answer and reset device. */
                         adapter_on_reset();
                     }
 
+                    /* Change UART speed. */
                     case discovery_Message_set_speed_tag:
                     {
-                        /* Change UART speed. */
                         adapter_on_set_speed(
                             &message->msg.discovery.msg.set_speed
                         );
                     }
                     break;
 
+                    /* Other messages are not supported. */
                     default:
                         adapter_on_unsupported(message);
                         break;
@@ -643,6 +897,8 @@ void dispatch_message(Message *message)
             }
             break;
 
+
+        /* Other message types are not (yet) supported. */
         default:
             adapter_on_unsupported(message);
             break;

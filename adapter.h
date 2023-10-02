@@ -19,6 +19,35 @@
 #define     HF_PA_CTRL3_PORT        GPIOC
 #define     HF_PA_CTRL3_PIN         GPIO5
 
+/**
+ * Structure declarations.
+ **/
+
+/* Adapter state. */
+typedef enum {
+    STOPPED = 0,
+    STARTED
+} adapter_state_t;
+
+/* Adapter mode (LoRa/FSK) */
+typedef enum {
+    LORA_MODE = 0,
+    FSK_MODE
+} adapter_mode_t;
+
+/* Main adapter structure. */
+typedef struct {
+    adapter_state_t state;
+    adapter_mode_t mode;
+    uint16_t sync_word;
+    subghz_lora_config_t lora_config;
+    subghz_fsk_config_t fsk_config;
+} adapter_t;
+
+/**
+ * Exported functions. 
+ **/
+
 void adapter_init(void);
 void dispatch_message(Message *p_msg);
 
