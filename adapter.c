@@ -432,9 +432,9 @@ void adapter_stop(void)
 }
 
 
-/**
+/**************************************
  * WHAD Discovery messages callbacks
- */
+ **************************************/
 
 /**
  * @brief   Handle discovery reset request
@@ -458,7 +458,7 @@ void adapter_on_reset(void)
  * @param   speed   `SetTransportSpeed` parameters
  * 
  * With this adapter, there is no need to change the default speed as it
- * cannot really go faster than 115200 bauds.
+ * cannot really go faster than 115200 bauds :/.
  */
 
 void adapter_on_set_speed(discovery_SetTransportSpeed *speed)
@@ -467,26 +467,6 @@ void adapter_on_set_speed(discovery_SetTransportSpeed *speed)
     
     whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
     whad_send_message(&cmd_result);
-
-    #if 0
-    if (speed->speed <= 460800)
-    {
-        /* Send success message. */
-        whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
-        send_pb_message(&cmd_result);
-
-        vTaskDelay(200 / portTICK_PERIOD_MS);
-
-        /* Reconfigure UART0 */
-        reconfigure_uart(speed->speed, false);
-    }
-    else
-    {
-        /* Send error message. */
-        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
-        send_pb_message(&cmd_result);   
-    }
-    #endif
 }
 
 
