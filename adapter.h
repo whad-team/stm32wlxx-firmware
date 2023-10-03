@@ -19,6 +19,10 @@
 #define     HF_PA_CTRL3_PORT        GPIOC
 #define     HF_PA_CTRL3_PIN         GPIO5
 
+#define     LORA_BW125              125000
+#define     LORA_BW250              250000
+#define     LORA_BW500              500000
+
 /**
  * Structure declarations.
  **/

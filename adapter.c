@@ -14,13 +14,16 @@ static uint64_t g_phy_supported_commands = (
     (1 << phy_PhyCommand_SetFSKModulation) |
     (1 << phy_PhyCommand_SetFrequency) |
     (1 << phy_PhyCommand_SetSyncWord) |
+    (1 << phy_PhyCommand_Sniff) |
+    (1 << phy_PhyCommand_SetPacketSize) |
+    (1 << phy_PhyCommand_SetDataRate) |
     (1 << phy_PhyCommand_Send) |
     (1 << phy_PhyCommand_Start) |
     (1 << phy_PhyCommand_Stop)
 );
 
 const phy_SupportedFrequencyRanges_FrequencyRange g_phy_supported_freq_ranges[]  = {
-    {865000000, 870000000},
+    {865000000, 915000000},
     {0, 0}
 };
 const int g_phy_supported_ranges_nb = 1;
@@ -214,22 +217,37 @@ void adapter_set_coding_rate(phy_LoRaCodingRate coding_rate)
  * @param   bandwidth     Bandwidth to use (125 kHz, 250 kHz or 500 kHz)
  */
 
-void adapter_set_bandwidth(phy_LoRaBandwidth bandwidth)
+void adapter_set_bandwidth(uint32_t bandwidth)
 {
     switch (bandwidth)
     {
-        case phy_LoRaBandwidth_BW125:
+        default:
+        case LORA_BW125:
             g_adapter.lora_config.bw = SUBGHZ_LORA_BW125;
             break;
 
-        case phy_LoRaBandwidth_BW250:
+        case LORA_BW250:
             g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;
             break;
 
-        default:
-        case phy_LoRaBandwidth_BW500:
+        case LORA_BW500:
             g_adapter.lora_config.bw = SUBGHZ_LORA_BW500;
             break;
+    }
+}
+
+
+/**
+ * @brief Set FSK deviation
+ * 
+ * @param   deviation     Deviation to use.
+ */
+
+void adapter_set_deviation(uint32_t deviation)
+{
+    if (g_adapter.mode == FSK_MODE)
+    {
+        g_adapter.fsk_config.freq_dev = deviation;
     }
 }
 
@@ -321,6 +339,17 @@ void adapter_enable_explicit_mode(bool enabled)
     }
 }
 
+void adapter_set_payload_length(uint32_t payload_length)
+{
+    if (g_adapter.mode == LORA_MODE)
+    {
+        g_adapter.lora_config.payload_length = (uint8_t)(payload_length & 0xff);
+    }
+    else
+    {
+        g_adapter.fsk_config.payload_length = (uint8_t)(payload_length & 0xff);
+    }
+}
 
 /**************************************
  * Main adapter routines.
@@ -359,7 +388,7 @@ void adapter_init(void)
     g_adapter.lora_config.header_type = SUBGHZ_PKT_LORA_VAR_LENGTH,  /* Explicit mode enabled. */
     g_adapter.lora_config.crc_enabled = false,                       /* CRC disabled by default. */
     g_adapter.lora_config.invert_iq = false,                         /* No IQ invert */
-    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED,          /* LDRO disabled */
+    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED,           /* LDRO disabled */
     g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_HP;               /* Power amplifier enabled */
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
@@ -369,6 +398,7 @@ void adapter_init(void)
     g_adapter.fsk_config.freq_dev = 50000;
     g_adapter.fsk_config.bit_rate = 1000000;
     g_adapter.fsk_config.crc = false;
+    g_adapter.fsk_config.payload_length = 40;
     g_adapter.fsk_config.packet_type = SUBGHZ_PKT_FIXED_LENGTH;
     g_adapter.fsk_config.pa_mode = SUBGHZ_PA_MODE_HP;
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
@@ -430,7 +460,6 @@ void adapter_stop(void)
     /* Mark adapter as stopped. */
     g_adapter.state = STOPPED;
 }
-
 
 /**************************************
  * WHAD Discovery messages callbacks
@@ -741,6 +770,69 @@ void adapter_on_stop(phy_StopCmd *cmd)
 
 
 /**
+ * @brief   Handle adapter sniffing mode
+ * 
+ * Enable sniffing (well, it is already enabled by default).
+ */
+
+void adapter_on_sniff(void)
+{
+    Message cmd_result;
+
+    /* Success. */
+    whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+    whad_send_message(&cmd_result);
+}
+
+
+/**
+ * @brief   Handle adapter packet size modification
+ * 
+ * @param   cmd: `SetPacketSizeCmd` message
+ */
+
+void adapter_on_packet_size(phy_SetPacketSizeCmd *cmd)
+{
+    Message cmd_result;
+
+    if (cmd->packet_size > 0xFF)
+    {
+        /* Error. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_PARAMETER_ERROR);
+        whad_send_message(&cmd_result);
+    }
+    else
+    {
+        adapter_set_payload_length(cmd->packet_size);
+
+        /* Success. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+        whad_send_message(&cmd_result);
+    }
+}
+
+
+/**
+ * @brief   Handle adapter data rate modification
+ * 
+ * Well, we don't support data rate. Make the host believe that
+ * everything went smooth =).
+ * 
+ * @param   cmd: `SetDataRateCmd` message
+ */
+
+void adapter_on_datarate(phy_SetDataRateCmd *cmd)
+{
+    Message cmd_result;
+
+    /* Success. */
+    whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+    whad_send_message(&cmd_result);
+}
+
+
+
+/**
  * @brief   Handle packet sending
  * 
  * @param   cmd     `SendCmd` message
@@ -864,6 +956,27 @@ void dispatch_message(Message *message)
                         adapter_on_stop(
                             &message->msg.phy.msg.stop
                         );
+                    }
+                    break;
+
+                    /* Enable sniffer mode. */
+                    case phy_Message_sniff_tag:
+                    {
+                        adapter_on_sniff();
+                    }
+                    break;
+
+                    /* Set packet size. */
+                    case phy_Message_packet_size_tag:
+                    {
+                        adapter_on_packet_size(&message->msg.phy.msg.packet_size);
+                    }
+                    break;
+
+                    /* Set datarate. */
+                    case phy_Message_datarate_tag:
+                    {
+                        adapter_on_datarate(&message->msg.phy.msg.datarate);
                     }
                     break;
 
