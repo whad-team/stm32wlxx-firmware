@@ -479,7 +479,7 @@ typedef struct {
 
   /* Packet configuration. */
   subghz_lora_packet_hdr_t header_type;
-  uint8_t preamble_length;
+  uint16_t preamble_length;
   uint8_t payload_length;
   bool crc_enabled;
   bool invert_iq;
@@ -520,6 +520,7 @@ typedef struct {
 typedef void (*F_on_packet_sent)(void);
 typedef void (*F_on_packet_recvd)(uint8_t offset, uint8_t length);
 typedef void (*F_on_timeout)(void);
+typedef void (*F_on_preamble)(void);
 typedef void (*F_on_rf_switch)(bool tx);
 
 /* Callback structure. */
@@ -527,6 +528,7 @@ typedef struct {
   F_on_packet_sent pfn_on_packet_sent;
   F_on_packet_recvd pfn_on_packet_recvd;
   F_on_timeout pfn_on_timeout;
+  F_on_timeout pfn_on_preamble;
   F_on_rf_switch pfn_on_rf_switch;
 } subghz_callbacks_t;
 
@@ -623,6 +625,10 @@ int subghz_send(uint8_t *p_frame, int length, uint32_t timeout);
 int subghz_send_async(uint8_t *p_frame, int length, uint32_t timeout);
 int subghz_receive(uint8_t *p_frame, uint8_t *p_length, uint32_t timeout);
 int subghz_receive_async(uint32_t timeout);
+
+/* Prepare send. */
+int subghz_prepare_send(uint8_t *p_frame, int length);
+int subghz_tx(uint32_t timeout);
 
 /* Syncword management (FSK / LoRa). */
 int subghz_set_syncword(uint8_t *p_syncword, int length);

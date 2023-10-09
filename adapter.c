@@ -1,4 +1,7 @@
 #include "adapter.h"
+#include "ppacket.h"
+
+extern volatile uint32_t g_timestamp;
 
 /**
  * Adapter WHAD capabilities and domains
@@ -34,16 +37,19 @@ const int g_phy_supported_ranges_nb = 1;
 static void adapter_on_rf_switch_cb(bool tx);
 static void adapter_on_pkt_received(uint8_t offset, uint8_t length);
 static void adapter_on_pkt_sent(void);
+static void adapter_on_preamble(void);
 
 static subghz_callbacks_t my_callbacks = {
     .pfn_on_packet_recvd = adapter_on_pkt_received,
     .pfn_on_packet_sent = adapter_on_pkt_sent,
     .pfn_on_rf_switch = adapter_on_rf_switch_cb,
     .pfn_on_timeout = adapter_on_pkt_sent,
+    .pfn_on_preamble = adapter_on_preamble
 };
 
 /* Main adapter structure. */
 static adapter_t g_adapter;
+static uint32_t g_pkt_timestamp = 0;
 
 /**************************************
  * Subghz callbacks
@@ -88,6 +94,7 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
     int8_t rssi = 0;
     int8_t rssi_inst = 0;
     uint32_t freq;
+    uint32_t timestamp = g_timestamp;
 
     /* Read instantaneous RSSI. */
     if (SUBGHZ_CMD_SUCCESS(subghz_get_rssi_inst((uint8_t *)&rssi)))
@@ -121,7 +128,7 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
             &msg,
             freq,
             rssi_inst,
-            0,
+            timestamp,
             rxbuf,
             length
         );
@@ -136,8 +143,20 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
 
 static void adapter_on_pkt_sent(void)
 {
+    Message cmd_result;
+    
+    /* Success. */
+    whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+    whad_send_message(&cmd_result);
+
     /* Switch back to async rx mode. */
     subghz_receive_async(0xFFFFFF);
+}
+
+static void adapter_on_preamble(void)
+{
+    g_pkt_timestamp = g_timestamp;
+    whad_verbose("preamb");
 }
 
 
@@ -169,10 +188,30 @@ void adapter_set_spreading_factor(phy_LoRaSpreadingFactor spreading_factor)
 
         case phy_LoRaSpreadingFactor_SF11:
             g_adapter.lora_config.sf = SUBGHZ_LORA_SF11;
+            
+            /* Enable LDRO if required. */
+            if (g_adapter.lora_config.bw == SUBGHZ_LORA_BW125)
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
+            }
+            else
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
+            }
             break;
 
         case phy_LoRaSpreadingFactor_SF12:
             g_adapter.lora_config.sf = SUBGHZ_LORA_SF12;
+
+            /* Enable LDRO if required. */
+            if ((g_adapter.lora_config.bw == SUBGHZ_LORA_BW125) || (g_adapter.lora_config.bw == SUBGHZ_LORA_BW250))
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
+            }
+            else
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
+            }
             break;
 
         default:
@@ -219,15 +258,37 @@ void adapter_set_coding_rate(phy_LoRaCodingRate coding_rate)
 
 void adapter_set_bandwidth(uint32_t bandwidth)
 {
+    /* TODO: handle FSK bandwidth as well ! */
+
     switch (bandwidth)
     {
         default:
         case LORA_BW125:
             g_adapter.lora_config.bw = SUBGHZ_LORA_BW125;
+
+            /* Enable LDRO if required. */
+            if ((g_adapter.lora_config.sf == SUBGHZ_LORA_SF11) || (g_adapter.lora_config.sf == SUBGHZ_LORA_SF12))
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
+            }
+            else
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
+            }
             break;
 
         case LORA_BW250:
             g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;
+
+            /* Enable LDRO if required. */
+            if (g_adapter.lora_config.sf == SUBGHZ_LORA_SF12)
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
+            }
+            else
+            {
+                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
+            }            
             break;
 
         case LORA_BW500:
@@ -361,6 +422,9 @@ void adapter_set_payload_length(uint32_t payload_length)
 
 void adapter_init(void)
 {
+    /* Initialize planned packets. */
+    planpacket_init();
+
     /* Initialize subghz sublayer. */
     subghz_init();
 
@@ -389,7 +453,7 @@ void adapter_init(void)
     g_adapter.lora_config.crc_enabled = false,                       /* CRC disabled by default. */
     g_adapter.lora_config.invert_iq = false,                         /* No IQ invert */
     g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED,           /* LDRO disabled */
-    g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_HP;               /* Power amplifier enabled */
+    g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_LP;               /* Power amplifier enabled */
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
     /* Initialize FSK adapter. */
@@ -408,6 +472,11 @@ void adapter_init(void)
 
     /* Adapter is stopped by default. */
     g_adapter.state = STOPPED;
+    
+    /* Prepared packet. */
+    g_adapter.prepared_packet_rdy = false;
+    g_adapter.pp_length = 0;
+    g_adapter.pp_timestamp = 0;
 }
 
 
@@ -629,6 +698,9 @@ void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
 {
     Message cmd_result;
 
+    /* Switch adapter into LoRa mode. */
+    g_adapter.mode = LORA_MODE;
+
     /* Update LoRa configuration. */
     adapter_set_spreading_factor(cmd->spreading_factor);
     adapter_set_coding_rate(cmd->coding_rate);
@@ -636,9 +708,6 @@ void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
     adapter_set_preamble_length(cmd->preamble_length);
     adapter_enable_crc(cmd->enable_crc);
     adapter_enable_explicit_mode(cmd->explicit);
-
-    /* Switch adapter into LoRa mode. */
-    g_adapter.mode = LORA_MODE;
 
     /* Success. */
     whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
@@ -852,18 +921,36 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
         return;
     }
 
-    /* Send packet, go back to RX if timeout or when packet is successfully sent. */
-    if (subghz_send_async(cmd->packet.bytes, cmd->packet.size, 0x9c400) == SUBGHZ_SUCCESS)
+    /* If timestamp is set (!=0), then it is a planned packet. */
+    if (cmd->timestamp > 0)
     {
-        /* Success. */
-        whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
-        whad_send_message(&cmd_result);
+        /* Add packet to our planned packets. */
+        if (planpacket_add(cmd->timestamp, cmd->packet.bytes, cmd->packet.size))
+        {
+            /* Return success now (but send later). */
+            whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+            whad_send_message(&cmd_result);
+        }
+        else
+        {
+            /* Failure (queue is full). */
+            whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+            whad_send_message(&cmd_result);            
+        }
     }
     else
     {
-        /* Failure. */
-        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
-        whad_send_message(&cmd_result);        
+        /* Send packet, go back to RX if timeout or when packet is successfully sent. */
+        if (subghz_send_async(cmd->packet.bytes, cmd->packet.size, 0x9c400) == SUBGHZ_SUCCESS)
+        {
+            /* Success message will be sent when the packet will be sent. */
+        }
+        else
+        {
+            /* Failure. */
+            whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+            whad_send_message(&cmd_result);        
+        }
     }
 }
 
@@ -1051,5 +1138,38 @@ void dispatch_message(Message *message)
         default:
             adapter_on_unsupported(message);
             break;
+    }
+}
+
+void adapter_send_planned_packets(void)
+{
+    uint32_t ts;
+
+    /* Check if we have a packet to send. */
+    if (!g_adapter.prepared_packet_rdy)
+    {
+        ts = g_timestamp;
+        if (planpacket_find(g_timestamp, g_adapter.prepared_pkt, &g_adapter.pp_length, &g_adapter.pp_timestamp))
+        {
+            subghz_prepare_send(g_adapter.prepared_pkt, g_adapter.pp_length);
+            g_adapter.prepared_packet_rdy = true;
+        }
+    }
+    else if (g_adapter.pp_timestamp <= g_timestamp)
+    {
+        subghz_tx(0x9c400);
+        whad_verbose("pkt sent");
+
+        /* No more pending packet */
+        g_adapter.prepared_packet_rdy = false;
+    }
+}
+
+void adapter_send_rdy(void)
+{
+    if ((g_adapter.prepared_packet_rdy) && (g_adapter.pp_timestamp <= g_timestamp))
+    {
+        /* Send packet now. */
+        subghz_tx(0x9c400);
     }
 }

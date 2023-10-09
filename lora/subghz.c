@@ -32,6 +32,7 @@ int subghz_wait_on_busy(void);
 void subghz_on_packet_sent_def_cb(void);
 void subghz_on_packet_recvd_def_cb(uint8_t offset, uint8_t length);
 void subghz_on_timeout_def_cb(void);
+void subghz_on_preamble_def_cb(void);
 void subghz_on_rf_switch_def_cb(bool tx);
 
 
@@ -53,6 +54,7 @@ int subghz_init(void)
   g_subghz_state.callbacks.pfn_on_packet_sent = subghz_on_packet_sent_def_cb;
   g_subghz_state.callbacks.pfn_on_rf_switch = subghz_on_rf_switch_def_cb;
   g_subghz_state.callbacks.pfn_on_timeout = subghz_on_timeout_def_cb;
+  g_subghz_state.callbacks.pfn_on_preamble = subghz_on_preamble_def_cb;
   g_flag_rx_done = false;
   g_flag_tx_done = false;
   g_flag_timeout = false;
@@ -1506,6 +1508,56 @@ int subghz_config_pa(subghz_pa_mode_t mode, subghz_pa_pwr_t power)
  * @param   timeout Transmission timeout
  * @return  SUBGHZ_SUCCESS if frame has been correctly sent, SUBGHZ_ERROR otherwise.
  */
+int subghz_prepare_send(uint8_t *p_frame, int length)
+{
+  /* Configure IRQ flags. */
+  if (SUBGHZ_CMD_FAILED(subghz_config_dio_irq(IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT, IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+                                              IRQ_RADIO_NONE, IRQ_RADIO_NONE)))
+  {
+    return SUBGHZ_ERROR;
+  }
+
+  /* Set payload buffer. */
+  if (SUBGHZ_CMD_FAILED(subghz_set_payload(p_frame, length)))
+  {
+    return SUBGHZ_ERROR;
+  }
+
+  /* Set packet length. */
+  g_subghz_state.lora_params.payload_length = length;
+  if (SUBGHZ_CMD_FAILED(subghz_set_lora_packet_params(g_subghz_state.lora_params.preamble_length,
+                                                      g_subghz_state.lora_params.header_type,
+                                                      g_subghz_state.lora_params.payload_length,
+                                                      g_subghz_state.lora_params.crc_enabled,
+                                                      g_subghz_state.lora_params.invert_iq)))
+  {
+    return SUBGHZ_ERROR;
+  }
+
+  /* Success. */
+  return SUBGHZ_SUCCESS;
+}
+
+int subghz_tx(uint32_t timeout)
+{
+  /* Start transmission. */
+  if (SUBGHZ_CMD_FAILED(subghz_set_tx_mode(timeout)))
+  {
+    return SUBGHZ_ERROR;
+  }
+
+  /* Success. */
+  return SUBGHZ_SUCCESS;
+}
+
+
+/**
+ * @brief   Write frame into TX buffer and send it.
+ * @param   p_frame pointer to a frame (byte array) to send
+ * @param   length frame length in bytes
+ * @param   timeout Transmission timeout
+ * @return  SUBGHZ_SUCCESS if frame has been correctly sent, SUBGHZ_ERROR otherwise.
+ */
 int subghz_send_async(uint8_t *p_frame, int length, uint32_t timeout)
 {
   /* Configure IRQ flags. */
@@ -1591,7 +1643,7 @@ int subghz_send(uint8_t *p_frame, int length, uint32_t timeout)
 int subghz_receive_async(uint32_t timeout)
 {
   /* Configure IRQ flags (no IRQ) */
-  if (SUBGHZ_CMD_FAILED(subghz_config_dio_irq(IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT, IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT,
+  if (SUBGHZ_CMD_FAILED(subghz_config_dio_irq(IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_PREAMBLE_DETECTED, IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_PREAMBLE_DETECTED,
                                               IRQ_RADIO_NONE, IRQ_RADIO_NONE)))
   {
     return SUBGHZ_ERROR;
@@ -1728,6 +1780,10 @@ void subghz_on_timeout_def_cb(void)
 {
 }
 
+void subghz_on_preamble_def_cb(void)
+{
+}
+
 void subghz_on_rf_switch_def_cb(bool tx)
 {
 }
@@ -1800,6 +1856,18 @@ void radio_isr(void)
 
     /* Clear TIMEOUT bit. */
     irq_clr.bits.timeout = 1;
+  }
+
+  /* Handle preamble detected. */
+  if (irq_status.bits.preamble)
+  {
+    if (g_subghz_state.callbacks.pfn_on_preamble != NULL)
+    {
+        g_subghz_state.callbacks.pfn_on_preamble();
+    }
+
+    /* Clear PREAMBLE bit. */
+    irq_clr.bits.preamble = 1;
   }
 
   /* Clear IRQ. */

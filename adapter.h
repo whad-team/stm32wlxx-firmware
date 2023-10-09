@@ -46,6 +46,12 @@ typedef struct {
     uint16_t sync_word;
     subghz_lora_config_t lora_config;
     subghz_fsk_config_t fsk_config;
+
+    /* Prepared packets. */
+    bool prepared_packet_rdy;
+    uint8_t prepared_pkt[256];
+    uint8_t pp_length;
+    uint32_t pp_timestamp;
 } adapter_t;
 
 /**
@@ -54,5 +60,7 @@ typedef struct {
 
 void adapter_init(void);
 void dispatch_message(Message *p_msg);
+void adapter_send_planned_packets(void);
+void adapter_send_rdy(void);
 
 #endif /* __INC_ADAPTER_H */

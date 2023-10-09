@@ -53,7 +53,10 @@
 
 static Message message;
 
+volatile uint32_t g_timestamp = 0;
+
 void uart_send_buffer_sync(uint8_t *p_data, int size);
+
 
 static whad_transport_cfg_t transport_config = {
   .max_txbuf_size = 64,
@@ -61,16 +64,60 @@ static whad_transport_cfg_t transport_config = {
   .pfn_message_cb = NULL
 };
 
+
+
 /* Setup APB1 frequency to 24MHz */
 static void clock_setup_bis(void)
 {
+  #if 0
+  /* Enable HSE (external osc, 32 MHz)*/
+  RCC_CR |= RCC_CR_HSEBYP;
+  rcc_osc_on(RCC_HSE);
+  rcc_wait_for_osc_ready(RCC_HSE);
+
+  /* Configure PLL. */
+
+  /*
+	* Set prescalers for AHB, ADC, APB1, APB2.
+	* Do this before touching the PLL (TODO: why?).
+	*/
+	rcc_set_hpre(0);
+	rcc_set_ppre1(0);
+	rcc_set_ppre2(0);
+
+  rcc_osc_off(RCC_PLL);
+  rcc_set_main_pll(
+    RCC_PLLCFGR_PLLSRC_HSE,
+    RCC_PLLCFGR_PLLM(8),
+    12,
+	  0,
+    0,
+    RCC_PLLCFGR_PLLR_DIV2
+  );
+
+	/* Enable PLL oscillator and wait for it to stabilize. */
+	rcc_osc_on(RCC_PLL);
+	rcc_wait_for_osc_ready(RCC_PLL);
+
+	/* Select PLL as SYSCLK source. */
+	rcc_set_sysclk_source(RCC_CFGR_SW_PLL);
+
+	/* Wait for PLL clock to be selected. */
+	rcc_wait_for_sysclk_status(RCC_PLL);
+
+	/* Set the peripheral clock frequencies used. */
+	rcc_ahb_frequency  = 24e6;
+	rcc_apb1_frequency = 24e6;
+	rcc_apb2_frequency = 24e6;
+  #endif
+  
   struct rcc_clock_scale pll_config = {
-    .pllm = 4,
+    .pllm = 8,
     .plln = 12,
     .pllp = 0,
     .pllq = 0,
     .pllr = RCC_PLLCFGR_PLLR_DIV2,
-    .pll_source = RCC_PLLCFGR_PLLSRC_HSI16,
+    .pll_source = RCC_PLLCFGR_PLLSRC_HSE,
     .hpre = 0,
     .ppre1 = 0,
     .ppre2 = 0,
@@ -79,15 +126,41 @@ static void clock_setup_bis(void)
     .apb2_frequency=24e6
   };
   rcc_clock_setup_pll(&pll_config);
-
-  RCC_CR |= RCC_CR_HSEBYP;
-  rcc_osc_on(RCC_HSE);
-  rcc_wait_for_osc_ready(RCC_HSE);
+  
 
   /* Enable clocks for the ports we need */
   rcc_periph_clock_enable(RCC_GPIOA);
   rcc_periph_clock_enable(RCC_GPIOB);
   rcc_periph_clock_enable(RCC_GPIOC);
+}
+
+static void timer_setup(void)
+{
+  /* And enable clock for TIMER 2. */
+  rcc_periph_clock_enable(RCC_TIM2);
+
+  /* Enable interrupt. */
+  nvic_enable_irq(NVIC_TIM2_IRQ);
+  nvic_set_priority(NVIC_TIM2_IRQ, 1);
+
+  /* Setup timer 2 for 1ms resolution. */
+  timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
+  
+  //timer_disable_preload(TIM2);
+  //timer_continuous_mode(TIM2);
+    
+  /* 24MHz/24 -> 1MHz, resolution of 1us. We want to overflow each 1ms.*/
+  timer_set_period(TIM2, 1000-1);
+
+  /* Disable compare outputs. */
+  timer_set_counter(TIM2, 0);
+  
+  timer_set_prescaler(TIM2, 24000);
+
+  /* Enable counter. */
+  timer_enable_irq(TIM2, TIM_DIER_UIE);
+  timer_enable_counter(TIM2);
+
 }
 
 static void usart_setup(void)
@@ -121,6 +194,21 @@ static void usart_setup(void)
 
     /* Finally enable the USART. */
     usart_enable(USART_CONSOLE);    
+}
+
+void tim2_isr(void)
+{ 
+  if (timer_get_flag(TIM2, TIM_SR_UIF)) {
+    gpio_toggle(GPIOB, GPIO11);
+
+    timer_set_counter(TIM2, 0);
+
+    /* Increment our timestamp. */
+    //g_timestamp++;
+
+    /* Ack interrupt. */
+    timer_clear_flag(TIM2, TIM_SR_UIF);
+  }
 }
 
 void usart1_isr(void)
@@ -201,10 +289,11 @@ int main(void)
   /* Setup clock & UART */
   clock_setup_bis();
   usart_setup();
+  timer_setup();
 
   /* LEDs */
-  gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
-  gpio_clear(GPIOB, GPIO15);
+  gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
+  gpio_set(GPIOB, GPIO11);
   gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
   gpio_clear(GPIOB, GPIO9);
 
@@ -215,7 +304,7 @@ int main(void)
   adapter_init();
 
   //whad_transport_send((uint8_t *)"This is a test\r\n", 16);
-  gpio_set(GPIOB, GPIO15);
+  gpio_set(GPIOB, GPIO11);
   gpio_set(GPIOB, GPIO9);
 
   //print_dbg("OK\r\n");
@@ -233,6 +322,9 @@ int main(void)
       print_dbg("Error while decoding\r\n");
     }
     */
+
+    /* Shall we send a pending packet ? */
+    adapter_send_planned_packets();
 
     /* Send pending data to UART. */
     whad_transport_send_pending();
