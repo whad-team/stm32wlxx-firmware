@@ -50,10 +50,10 @@
 #define HF_PA_CTRL3_PIN  GPIO5
 
 #define USART_CONSOLE USART1  /* PB6/7 , af7 */
-
+#define g_timestamp TIM2_CNT
 static Message message;
 
-volatile uint32_t g_timestamp = 0;
+//volatile uint32_t g_timestamp = 0;
 
 void uart_send_buffer_sync(uint8_t *p_data, int size);
 
@@ -69,12 +69,12 @@ static whad_transport_cfg_t transport_config = {
 /* Setup APB1 frequency to 24MHz */
 static void clock_setup_bis(void)
 {
-  #if 0
   /* Enable HSE (external osc, 32 MHz)*/
   RCC_CR |= RCC_CR_HSEBYP;
   rcc_osc_on(RCC_HSE);
   rcc_wait_for_osc_ready(RCC_HSE);
 
+  #if 0
   /* Configure PLL. */
 
   /*
@@ -126,7 +126,6 @@ static void clock_setup_bis(void)
     .apb2_frequency=24e6
   };
   rcc_clock_setup_pll(&pll_config);
-  
 
   /* Enable clocks for the ports we need */
   rcc_periph_clock_enable(RCC_GPIOA);
@@ -138,6 +137,8 @@ static void timer_setup(void)
 {
   /* And enable clock for TIMER 2. */
   rcc_periph_clock_enable(RCC_TIM2);
+  /* Reset TIM2 peripheral to defaults. */
+  rcc_periph_reset_pulse(RST_TIM2);
 
   /* Enable interrupt. */
   nvic_enable_irq(NVIC_TIM2_IRQ);
@@ -145,17 +146,15 @@ static void timer_setup(void)
 
   /* Setup timer 2 for 1ms resolution. */
   timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
-  
-  //timer_disable_preload(TIM2);
-  //timer_continuous_mode(TIM2);
-    
-  /* 24MHz/24 -> 1MHz, resolution of 1us. We want to overflow each 1ms.*/
-  timer_set_period(TIM2, 1000-1);
-
-  /* Disable compare outputs. */
+      
+  /* Reset counter value. */
   timer_set_counter(TIM2, 0);
   
-  timer_set_prescaler(TIM2, 24000);
+  /* Set timer prescaler. */
+  timer_set_prescaler(TIM2, (24000)-1);
+
+  /* 24MHz/24 -> 1MHz, resolution of 1ms (counter is increment every 1ms). */
+  timer_set_period(TIM2, (1000)-1);
 
   /* Enable counter. */
   timer_enable_irq(TIM2, TIM_DIER_UIE);
@@ -196,18 +195,21 @@ static void usart_setup(void)
     usart_enable(USART_CONSOLE);    
 }
 
+
 void tim2_isr(void)
 { 
-  if (timer_get_flag(TIM2, TIM_SR_UIF)) {
+
+  if (TIM_SR(TIM2) & TIM_SR_UIF)
+  {
     gpio_toggle(GPIOB, GPIO11);
 
-    timer_set_counter(TIM2, 0);
+    //timer_set_counter(TIM2, 0);
 
     /* Increment our timestamp. */
-    //g_timestamp++;
+    //g_timestamp = TIM2_CNT;
 
     /* Ack interrupt. */
-    timer_clear_flag(TIM2, TIM_SR_UIF);
+    TIM_SR(TIM2) &= ~TIM_SR_UIF;
   }
 }
 
@@ -293,7 +295,7 @@ int main(void)
 
   /* LEDs */
   gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
-  gpio_set(GPIOB, GPIO11);
+  gpio_clear(GPIOB, GPIO11);
   gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
   gpio_clear(GPIOB, GPIO9);
 

@@ -1,7 +1,9 @@
 #include "adapter.h"
 #include "ppacket.h"
+#include <libopencm3/stm32/timer.h>
 
-extern volatile uint32_t g_timestamp;
+//extern volatile uint32_t g_timestamp;
+#define g_timestamp TIM2_CNT
 
 /**
  * Adapter WHAD capabilities and domains
