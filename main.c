@@ -32,6 +32,7 @@
 
 #include "lora/subghz.h"
 #include "adapter.h"
+#include "sys.h"
 
 
 #define RF_SW_CTRL1_PIN                          GPIO4
@@ -50,10 +51,7 @@
 #define HF_PA_CTRL3_PIN  GPIO5
 
 #define USART_CONSOLE USART1  /* PB6/7 , af7 */
-#define g_timestamp TIM2_CNT
 static Message message;
-
-//volatile uint32_t g_timestamp = 0;
 
 void uart_send_buffer_sync(uint8_t *p_data, int size);
 
@@ -112,12 +110,12 @@ static void clock_setup_bis(void)
   #endif
   
   struct rcc_clock_scale pll_config = {
-    .pllm = 8,
+    .pllm = 4,
     .plln = 12,
     .pllp = 0,
     .pllq = 0,
     .pllr = RCC_PLLCFGR_PLLR_DIV2,
-    .pll_source = RCC_PLLCFGR_PLLSRC_HSE,
+    .pll_source = RCC_PLLCFGR_PLLSRC_HSI16,
     .hpre = 0,
     .ppre1 = 0,
     .ppre2 = 0,
@@ -151,10 +149,10 @@ static void timer_setup(void)
   timer_set_counter(TIM2, 0);
   
   /* Set timer prescaler. */
-  timer_set_prescaler(TIM2, (24000)-1);
+  timer_set_prescaler(TIM2, (2400)-1);
 
   /* 24MHz/24 -> 1MHz, resolution of 1ms (counter is increment every 1ms). */
-  timer_set_period(TIM2, (1000)-1);
+  timer_set_period(TIM2, (10)-1);
 
   /* Enable counter. */
   timer_enable_irq(TIM2, TIM_DIER_UIE);
@@ -201,12 +199,11 @@ void tim2_isr(void)
 
   if (TIM_SR(TIM2) & TIM_SR_UIF)
   {
-    gpio_toggle(GPIOB, GPIO11);
-
+    //gpio_toggle(GPIOB, GPIO11);
     //timer_set_counter(TIM2, 0);
 
-    /* Increment our timestamp. */
-    //g_timestamp = TIM2_CNT;
+    sys_tick();
+    adapter_send_rdy();
 
     /* Ack interrupt. */
     TIM_SR(TIM2) &= ~TIM_SR_UIF;

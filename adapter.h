@@ -12,12 +12,22 @@
 #define     RF_SW_CTRL2_PIN         GPIO5
 #define     RF_SW_CTRL2_GPIO_PORT   GPIOA
 
-#define     HF_PA_CTRL1_PORT        GPIOC
-#define     HF_PA_CTRL1_PIN         GPIO3
-#define     HF_PA_CTRL2_PORT        GPIOC
-#define     HF_PA_CTRL2_PIN         GPIO4
-#define     HF_PA_CTRL3_PORT        GPIOC
-#define     HF_PA_CTRL3_PIN         GPIO5
+#ifdef NUCLEO_WL55
+  #define     HF_PA_CTRL1_PORT        GPIOC
+  #define     HF_PA_CTRL1_PIN         GPIO3
+  #define     HF_PA_CTRL2_PORT        GPIOC
+  #define     HF_PA_CTRL2_PIN         GPIO4
+  #define     HF_PA_CTRL3_PORT        GPIOC
+  #define     HF_PA_CTRL3_PIN         GPIO5
+#endif
+
+#ifdef LORAE5MINI
+  #define     HF_PA_CTRL1_PORT        GPIOA
+  #define     HF_PA_CTRL1_PIN         GPIO4
+  #define     HF_PA_CTRL2_PORT        GPIOA
+  #define     HF_PA_CTRL2_PIN         GPIO5
+#endif
+
 
 #define     LORA_BW125              125000
 #define     LORA_BW250              250000
@@ -60,7 +70,6 @@ typedef struct {
 
 void adapter_init(void);
 void dispatch_message(Message *p_msg);
-void adapter_send_planned_packets(void);
 void adapter_send_rdy(void);
 
 #endif /* __INC_ADAPTER_H */

@@ -1,9 +1,9 @@
 #include "adapter.h"
 #include "ppacket.h"
 #include <libopencm3/stm32/timer.h>
+#include <libopencm3/stm32/gpio.h>
 
-//extern volatile uint32_t g_timestamp;
-#define g_timestamp TIM2_CNT
+//#define g_timestamp TIM2_CNT
 
 /**
  * Adapter WHAD capabilities and domains
@@ -37,7 +37,7 @@ const int g_phy_supported_ranges_nb = 1;
  * RF-related callbacks.
  **/
 static void adapter_on_rf_switch_cb(bool tx);
-static void adapter_on_pkt_received(uint8_t offset, uint8_t length);
+static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t timestamp);
 static void adapter_on_pkt_sent(void);
 static void adapter_on_preamble(void);
 
@@ -52,6 +52,14 @@ static subghz_callbacks_t my_callbacks = {
 /* Main adapter structure. */
 static adapter_t g_adapter;
 static uint32_t g_pkt_timestamp = 0;
+/*
+typedef struct {
+  uint32_t timestamp;
+  uint8_t packet[PACKET_MAX_SIZE];
+  int length;
+} planned_packet_t;
+*/
+static planned_packet_t g_sched_pkt;
 
 /**************************************
  * Subghz callbacks
@@ -65,6 +73,7 @@ static uint32_t g_pkt_timestamp = 0;
 
 static void adapter_on_rf_switch_cb(bool tx)
 {
+    #ifdef NUCLEO_WL55
     gpio_mode_setup(RF_SW_CTRL1_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, RF_SW_CTRL1_PIN);
     gpio_mode_setup(RF_SW_CTRL2_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, RF_SW_CTRL2_PIN);
     gpio_set(RF_SW_CTRL1_GPIO_PORT, RF_SW_CTRL1_PIN);
@@ -79,8 +88,26 @@ static void adapter_on_rf_switch_cb(bool tx)
         /* RX mode, low power */
         gpio_clear(RF_SW_CTRL2_GPIO_PORT, RF_SW_CTRL2_PIN);
     }
-}
+    #endif
 
+    #ifdef LORAE5MINI
+    gpio_mode_setup(RF_SW_CTRL1_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, RF_SW_CTRL1_PIN);
+    gpio_mode_setup(RF_SW_CTRL2_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, RF_SW_CTRL2_PIN);
+
+    if (tx)
+    {
+        /* TX mode, low power */
+        gpio_set(RF_SW_CTRL1_GPIO_PORT, RF_SW_CTRL1_PIN);
+        gpio_clear(RF_SW_CTRL2_GPIO_PORT, RF_SW_CTRL2_PIN);
+    }
+    else
+    {
+        /* RX mode, low power */
+        gpio_clear(RF_SW_CTRL1_GPIO_PORT, RF_SW_CTRL1_PIN);
+        gpio_set(RF_SW_CTRL2_GPIO_PORT, RF_SW_CTRL2_PIN);
+    }
+    #endif
+}
 
 /**
  * @brief   Handle packet reception.
@@ -89,14 +116,15 @@ static void adapter_on_rf_switch_cb(bool tx)
  * @param   length  Packet length in bytes
  */
 
-static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
+static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t timestamp)
 {
     Message msg;
     uint8_t rxbuf[256];
     int8_t rssi = 0;
     int8_t rssi_inst = 0;
     uint32_t freq;
-    uint32_t timestamp = g_timestamp;
+
+    gpio_toggle(GPIOB, GPIO11);
 
     /* Read instantaneous RSSI. */
     if (SUBGHZ_CMD_SUCCESS(subghz_get_rssi_inst((uint8_t *)&rssi)))
@@ -146,18 +174,25 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length)
 static void adapter_on_pkt_sent(void)
 {
     Message cmd_result;
-    
-    /* Success. */
-    whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
-    whad_send_message(&cmd_result);
 
     /* Switch back to async rx mode. */
-    subghz_receive_async(0xFFFFFF);
+    if (subghz_receive_async(0xFFFFFF) ==SUBGHZ_SUCCESS)
+    {
+        /* Success. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+        whad_send_message(&cmd_result);
+    }
+    else
+    {
+        /* Success. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+        whad_send_message(&cmd_result);
+    }
 }
 
 static void adapter_on_preamble(void)
 {
-    g_pkt_timestamp = g_timestamp;
+    g_pkt_timestamp = sys_get_timestamp();
     whad_verbose("preamb");
 }
 
@@ -430,13 +465,20 @@ void adapter_init(void)
     /* Initialize subghz sublayer. */
     subghz_init();
 
-    /* Initialize RX/TX switch configuration. */
+    #ifdef LORAE5MINI
+    subghz_set_regulator_mode(SUBGHZ_REGMODE_SMPS);
+    #endif
+
+    /* Initialize RX/TX switch configuration (switch off). */
 	gpio_mode_setup(HF_PA_CTRL1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, HF_PA_CTRL1_PIN);
     gpio_set(HF_PA_CTRL1_PORT, HF_PA_CTRL1_PIN);
 	gpio_mode_setup(HF_PA_CTRL2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, HF_PA_CTRL2_PIN);
     gpio_set(HF_PA_CTRL2_PORT, HF_PA_CTRL2_PIN);
+
+    #ifdef NUCLEO_WL55
 	gpio_mode_setup(HF_PA_CTRL3_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, HF_PA_CTRL3_PIN);
     gpio_set(HF_PA_CTRL3_PORT, HF_PA_CTRL3_PIN);
+    #endif
 
     /* Set our callbacks. */
     subghz_set_callbacks(&my_callbacks);
@@ -455,7 +497,7 @@ void adapter_init(void)
     g_adapter.lora_config.crc_enabled = false,                       /* CRC disabled by default. */
     g_adapter.lora_config.invert_iq = false,                         /* No IQ invert */
     g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED,           /* LDRO disabled */
-    g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_LP;               /* Power amplifier enabled */
+    g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_HP;               /* Power amplifier enabled */
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
     /* Initialize FSK adapter. */
@@ -476,6 +518,9 @@ void adapter_init(void)
     g_adapter.state = STOPPED;
     
     /* Prepared packet. */
+    g_sched_pkt.length = 0;
+    g_sched_pkt.timestamp = 0;
+
     g_adapter.prepared_packet_rdy = false;
     g_adapter.pp_length = 0;
     g_adapter.pp_timestamp = 0;
@@ -926,6 +971,7 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
     /* If timestamp is set (!=0), then it is a planned packet. */
     if (cmd->timestamp > 0)
     {
+        #if 0
         /* Add packet to our planned packets. */
         if (planpacket_add(cmd->timestamp, cmd->packet.bytes, cmd->packet.size))
         {
@@ -939,6 +985,14 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
             whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
             whad_send_message(&cmd_result);            
         }
+        #endif
+        g_sched_pkt.timestamp = cmd->timestamp;
+        g_sched_pkt.length = cmd->packet.size;
+        memcpy(g_sched_pkt.packet, cmd->packet.bytes, cmd->packet.size);
+
+        /* Return success now (but send later). */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+        whad_send_message(&cmd_result);
     }
     else
     {
@@ -946,6 +1000,8 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
         if (subghz_send_async(cmd->packet.bytes, cmd->packet.size, 0x9c400) == SUBGHZ_SUCCESS)
         {
             /* Success message will be sent when the packet will be sent. */
+            whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+            whad_send_message(&cmd_result);
         }
         else
         {
@@ -1150,28 +1206,52 @@ void adapter_send_planned_packets(void)
     /* Check if we have a packet to send. */
     if (!g_adapter.prepared_packet_rdy)
     {
-        ts = g_timestamp;
-        if (planpacket_find(g_timestamp, g_adapter.prepared_pkt, &g_adapter.pp_length, &g_adapter.pp_timestamp))
+        ts = sys_get_timestamp();
+        #if 0
+        if (planpacket_find(ts, g_adapter.prepared_pkt, &g_adapter.pp_length, &g_adapter.pp_timestamp))
         {
-            subghz_prepare_send(g_adapter.prepared_pkt, g_adapter.pp_length);
+            //subghz_prepare_send(g_adapter.prepared_pkt, g_adapter.pp_length);
             g_adapter.prepared_packet_rdy = true;
         }
+        #endif
+        if (((ts + PACKET_PREPARE_TIME) >= g_sched_pkt.timestamp) && (g_sched_pkt.timestamp > 0))
+        {
+            //subghz_prepare_send(g_adapter.prepared_pkt, g_adapter.pp_length);
+            g_adapter.prepared_packet_rdy = true;
+            //g_sched_pkt.timestamp = 0;
+        }
     }
-    else if (g_adapter.pp_timestamp <= g_timestamp)
+    #if 0
+    else if (g_adapter.pp_timestamp <= sys_get_timestamp())
     {
-        subghz_tx(0x9c400);
         whad_verbose("pkt sent");
 
         /* No more pending packet */
         g_adapter.prepared_packet_rdy = false;
     }
+    #endif
 }
 
 void adapter_send_rdy(void)
 {
-    if ((g_adapter.prepared_packet_rdy) && (g_adapter.pp_timestamp <= g_timestamp))
+    uint32_t ts = sys_get_timestamp();
+    #if 0
+    if ((g_adapter.prepared_packet_rdy) && (g_adapter.pp_timestamp <= sys_get_timestamp()) && (g_adapter.pp_timestamp > 0))
     {
+        gpio_toggle(GPIOB, GPIO11);
+
+        g_adapter.pp_timestamp = 0;
+
         /* Send packet now. */
-        subghz_tx(0x9c400);
+        //subghz_tx(0);
+        g_adapter.prepared_packet_rdy = false;
+    }
+    #endif
+    if ((g_adapter.prepared_packet_rdy) && (ts >= g_sched_pkt.timestamp))
+    {
+        gpio_toggle(GPIOB, GPIO11);
+        subghz_send_async(g_sched_pkt.packet, g_sched_pkt.length, 0);
+        g_adapter.prepared_packet_rdy = false;
+        g_sched_pkt.timestamp = 0;
     }
 }

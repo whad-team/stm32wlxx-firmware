@@ -1311,6 +1311,8 @@ int subghz_lora_mode(subghz_lora_config_t *p_lora_config)
   /* Backup our LoRa parameters. */
   memcpy(&g_subghz_state.lora_params, p_lora_config, sizeof(subghz_lora_config_t));
 
+  /* Compute LDRO based on SF and BW. */
+
   /* Set packet type to LoRa. */
   if (SUBGHZ_CMD_FAILED(subghz_set_packet_type(SUBGHZ_PACKET_LORA)))
   {
@@ -1798,6 +1800,7 @@ void radio_isr(void)
   subghz_irq_status_t irq_status;
   subghz_irq_status_t irq_clr;
   subghz_rxbuf_status_t rxbuf_status;
+  uint32_t timestamp = sys_get_timestamp();
 
   /* Initialize our IRQ clear value. */
   irq_clr.word = 0;
@@ -1834,7 +1837,7 @@ void radio_isr(void)
       {
         if (g_subghz_state.callbacks.pfn_on_packet_recvd != NULL)
         {
-            g_subghz_state.callbacks.pfn_on_packet_recvd(rxbuf_status.buffer_offset, rxbuf_status.payload_length);
+            g_subghz_state.callbacks.pfn_on_packet_recvd(rxbuf_status.buffer_offset, rxbuf_status.payload_length, timestamp);
         }
       }
     }

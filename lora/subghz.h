@@ -3,6 +3,7 @@
 
 #include <libopencm3/stm32/spi.h>
 #include <libopencm3/stm32/gpio.h>
+#include "../sys.h"
 
 #define SUBGHZ_DEFAULT_TIMEOUT    100U /* SUBGHZ default timeout: 100ms */
 #define SUBGHZ_RFBUSY_LOOP_TIME   ((rcc_ahb_frequency*24U)>>20U)
@@ -518,7 +519,7 @@ typedef struct {
 
 /* Callback types. */
 typedef void (*F_on_packet_sent)(void);
-typedef void (*F_on_packet_recvd)(uint8_t offset, uint8_t length);
+typedef void (*F_on_packet_recvd)(uint8_t offset, uint8_t length, uint32_t timestamp);
 typedef void (*F_on_timeout)(void);
 typedef void (*F_on_preamble)(void);
 typedef void (*F_on_rf_switch)(bool tx);
