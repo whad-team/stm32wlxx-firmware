@@ -54,11 +54,13 @@ LD_FLAGS     += -u _printf_float
 PROJECT      = main
 ADAPTER		 = adapter
 PPACKET		 = ppacket
+SYS			 = sys
 
 # tells make that these don't produce a file
-.PHONY: clean flash lib $(PROJECT)
+.PHONY: clean flash lib lora_e5_mini nucleo_wl55
 
-$(PROJECT) : $(PROJECT).elf $(PROJECT).bin $(PROJECT).hex ;
+nucleo_wl55 : nucleo_wl55.elf nucleo_wl55.bin nucleo_wl55.hex ;
+lora_e5_mini: lora_e5_mini.elf lora_e5_mini.bin lora_e5_mini.hex ;
 
 flash : $(PROJECT).bin	
 	$(STFLASH) write $(PROJECT).bin $(DEV_ROMOFF)
@@ -78,16 +80,32 @@ $(DEV_LDFILE):
 	$(CC) $(OPENCM3_DIR)/ld/linker.ld.S $(DEV_LDDATA) -P -E -o $(DEV_LDFILE)
 
 %.bin: %.elf
-	$(OBJCOPY) -Obinary $(PROJECT).elf $(PROJECT).bin
+	$(OBJCOPY) -Obinary $< $@
 
 %.hex: %.elf
-	$(OBJCOPY) -Oihex $(PROJECT).elf $(PROJECT).hex
+	$(OBJCOPY) -Oihex $< $@
 
-$(PROJECT).elf : lib $(PROJECT).o $(ADAPTER).o $(PPACKET).o $(DEV_LDFILE) lora/subghz.o
-	$(CC) $(C_FLAGS) -o $(PROJECT).elf $(PROJECT).o $(ADAPTER).o $(PPACKET).o lora/subghz.o $(LD_FLAGS)
+nucleo_wl55.elf : lib main.c adapter.c ppacket.c sys.c $(DEV_LDFILE) lora/subghz.c
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -DNUCLEO_WL55 -c adapter.c -o adapter.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c sys.c -o sys.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c ppacket.c -o ppacket.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c lora/subghz.c -o lora/subghz.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c main.c -o main.o
+	$(CC) $(C_FLAGS) -o nucleo_wl55.elf main.o adapter.o sys.o ppacket.o lora/subghz.o $(LD_FLAGS)
+
+lora_e5_mini.elf : lib main.c adapter.c ppacket.c sys.c $(DEV_LDFILE) lora/subghz.c
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -DLORAE5MINI -c adapter.c -o adapter.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c sys.c -o sys.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c ppacket.c -o ppacket.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c lora/subghz.c -o lora/subghz.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c main.c -o main.o
+	$(CC) $(C_FLAGS) -o lora_e5_mini.elf main.o adapter.o sys.o ppacket.o lora/subghz.o $(LD_FLAGS)
 
 lora/subghz.o: lora/subghz.c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o lora/subghz.o lora/subghz.c
+
+$(SYS).o: $(SYS).c
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(SYS).o $(SYS).c
 
 $(PPACKET).o: $(PPACKET).c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(PPACKET).o $(PPACKET).c
