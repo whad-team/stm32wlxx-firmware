@@ -10,6 +10,36 @@ static planned_packet_t g_planned_pkts[PLANNED_PACKET_MAX];
 
 void planpacket_init(void)
 {
+    g_planned_pkts[0].timestamp = 0;
+    g_planned_pkts[0].length = 0;
+}
+
+bool planpacket_add(uint32_t timestamp, uint8_t *p_pkt, int length)
+{
+    g_planned_pkts[0].timestamp = timestamp;
+    g_planned_pkts[0].length = length;
+    memcpy(g_planned_pkts[0].packet, p_pkt, length);
+    return true;
+}
+
+bool planpacket_find(uint32_t timestamp, uint8_t *p_pkt, int *p_length, uint32_t *p_timestamp)
+{
+    if ((g_planned_pkts[0].timestamp > 0) && (g_planned_pkts[0].timestamp <= (timestamp + PACKET_PREPARE_TIME)))
+    {
+        *p_timestamp = g_planned_pkts[0].timestamp;
+        g_planned_pkts[0].timestamp = 0;
+        *p_length = g_planned_pkts[0].length;
+        memcpy(p_pkt, g_planned_pkts[0].packet, g_planned_pkts[0].length);
+
+        return true;
+    }
+
+    return false;
+}
+
+#if 0
+void planpacket_init(void)
+{
     int i;
 
     for (i=0; i<PLANNED_PACKET_MAX; i++)
@@ -80,3 +110,4 @@ bool planpacket_find(uint32_t timestamp, uint8_t *p_pkt, int *p_length, uint32_t
     /* No planned packet ready to send. */
     return false;
 }
+#endif
