@@ -71,5 +71,6 @@ typedef struct {
 void adapter_init(void);
 void dispatch_message(Message *p_msg);
 void adapter_send_rdy(void);
+void adapter_send_scheduled_packets(void);
 
 #endif /* __INC_ADAPTER_H */

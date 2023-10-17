@@ -519,7 +519,7 @@ typedef struct {
 
 /* Callback types. */
 typedef void (*F_on_packet_sent)(void);
-typedef void (*F_on_packet_recvd)(uint8_t offset, uint8_t length, uint32_t timestamp);
+typedef void (*F_on_packet_recvd)(uint8_t offset, uint8_t length, uint32_t ts_sec, uint32_t ts_usec);
 typedef void (*F_on_timeout)(void);
 typedef void (*F_on_preamble)(void);
 typedef void (*F_on_rf_switch)(bool tx);

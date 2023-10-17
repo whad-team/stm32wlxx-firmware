@@ -110,12 +110,12 @@ static void clock_setup_bis(void)
   #endif
   
   struct rcc_clock_scale pll_config = {
-    .pllm = 4,
+    .pllm = 8,
     .plln = 12,
     .pllp = 0,
     .pllq = 0,
     .pllr = RCC_PLLCFGR_PLLR_DIV2,
-    .pll_source = RCC_PLLCFGR_PLLSRC_HSI16,
+    .pll_source = RCC_PLLCFGR_PLLSRC_HSE,
     .hpre = 0,
     .ppre1 = 0,
     .ppre2 = 0,
@@ -148,11 +148,17 @@ static void timer_setup(void)
   /* Reset counter value. */
   timer_set_counter(TIM2, 0);
   
-  /* Set timer prescaler. */
-  timer_set_prescaler(TIM2, (2400)-1);
+  /* Set timer prescaler (Ftim2=1MHz). */
+  timer_set_prescaler(TIM2, (24)-1);
 
-  /* 24MHz/24 -> 1MHz, resolution of 1ms (counter is increment every 1ms). */
-  timer_set_period(TIM2, (10)-1);
+  /* Timer will overflow each second. */
+  timer_set_period(TIM2, (1000000)-1);
+
+  /* Stop Timer2 OC1. */
+  timer_disable_oc_output(TIM2, TIM_OC1);
+  timer_set_oc_mode(TIM2, TIM_OC1, TIM_OCM_FROZEN);
+  timer_clear_flag(TIM2, TIM_SR_CC1IF);
+  timer_disable_irq(TIM2, TIM_DIER_CC1IE);
 
   /* Enable counter. */
   timer_enable_irq(TIM2, TIM_DIER_UIE);
@@ -200,13 +206,31 @@ void tim2_isr(void)
   if (TIM_SR(TIM2) & TIM_SR_UIF)
   {
     //gpio_toggle(GPIOB, GPIO11);
-    //timer_set_counter(TIM2, 0);
 
+    /* Call sys_tick() to get track of each elapsed second. */
     sys_tick();
-    adapter_send_rdy();
+
+    /**
+     * Handle scheduled packets.
+     * 
+     * If a packet has to be scheduled for this specific timeslot (1s),
+     * then setup a compare value that will trigger an IRQ in order to
+     * send this packet when asked.
+     **/
+
+    //adapter_send_rdy();
 
     /* Ack interrupt. */
     TIM_SR(TIM2) &= ~TIM_SR_UIF;
+  }
+
+  /* If compare channel 1 is triggered */
+  if ((TIM_SR(TIM2) & TIM_SR_CC1IF) && (TIM_DIER(TIM2) & TIM_DIER_CC1IE))
+  {
+    adapter_send_scheduled_packets();
+
+    /* Ack interrupt. */
+    TIM_SR(TIM2) &= ~TIM_SR_CC1IF;
   }
 }
 
@@ -321,9 +345,6 @@ int main(void)
       print_dbg("Error while decoding\r\n");
     }
     */
-
-    /* Shall we send a pending packet ? */
-    adapter_send_planned_packets();
 
     /* Send pending data to UART. */
     whad_transport_send_pending();

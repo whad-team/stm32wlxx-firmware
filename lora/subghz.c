@@ -1800,7 +1800,8 @@ void radio_isr(void)
   subghz_irq_status_t irq_status;
   subghz_irq_status_t irq_clr;
   subghz_rxbuf_status_t rxbuf_status;
-  uint32_t timestamp = sys_get_timestamp();
+  uint32_t ts_usec = sys_get_timestamp_usec();
+  uint32_t ts_sec = sys_get_timestamp_sec();
 
   /* Initialize our IRQ clear value. */
   irq_clr.word = 0;
@@ -1827,6 +1828,9 @@ void radio_isr(void)
   /* Handle packet reception. */
   if (irq_status.bits.rx_done)
   {
+    //gpio_clear(GPIOB, GPIO11);
+    GPIOB_BSRR |= (1 << (11+16)); /* clear B11 */
+
     /* Save flag for synchronous mode. */
     g_flag_rx_done = true;
 
@@ -1837,7 +1841,7 @@ void radio_isr(void)
       {
         if (g_subghz_state.callbacks.pfn_on_packet_recvd != NULL)
         {
-            g_subghz_state.callbacks.pfn_on_packet_recvd(rxbuf_status.buffer_offset, rxbuf_status.payload_length, timestamp);
+            g_subghz_state.callbacks.pfn_on_packet_recvd(rxbuf_status.buffer_offset, rxbuf_status.payload_length, ts_sec, ts_usec);
         }
       }
     }

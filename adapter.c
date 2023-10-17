@@ -1,5 +1,5 @@
 #include "adapter.h"
-#include "ppacket.h"
+#include "schedpkt.h"
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/stm32/gpio.h>
 
@@ -37,7 +37,7 @@ const int g_phy_supported_ranges_nb = 1;
  * RF-related callbacks.
  **/
 static void adapter_on_rf_switch_cb(bool tx);
-static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t timestamp);
+static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t ts_sec, uint32_t ts_usec);
 static void adapter_on_pkt_sent(void);
 static void adapter_on_preamble(void);
 
@@ -59,7 +59,9 @@ typedef struct {
   int length;
 } planned_packet_t;
 */
-static planned_packet_t g_sched_pkt;
+static sched_packet_t g_sched_pkt;
+static volatile bool g_sched_pkt_rdy = false;
+static volatile bool g_sched_pkt_timer_set = false;
 
 /**************************************
  * Subghz callbacks
@@ -116,15 +118,13 @@ static void adapter_on_rf_switch_cb(bool tx)
  * @param   length  Packet length in bytes
  */
 
-static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t timestamp)
+static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t ts_sec, uint32_t ts_usec)
 {
     Message msg;
     uint8_t rxbuf[256];
     int8_t rssi = 0;
     int8_t rssi_inst = 0;
     uint32_t freq;
-
-    gpio_toggle(GPIOB, GPIO11);
 
     /* Read instantaneous RSSI. */
     if (SUBGHZ_CMD_SUCCESS(subghz_get_rssi_inst((uint8_t *)&rssi)))
@@ -158,7 +158,8 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t tim
             &msg,
             freq,
             rssi_inst,
-            timestamp,
+            ts_sec,
+            ts_usec,
             rxbuf,
             length
         );
@@ -192,7 +193,7 @@ static void adapter_on_pkt_sent(void)
 
 static void adapter_on_preamble(void)
 {
-    g_pkt_timestamp = sys_get_timestamp();
+    g_pkt_timestamp = sys_get_timestamp_sec();
     whad_verbose("preamb");
 }
 
@@ -460,7 +461,7 @@ void adapter_set_payload_length(uint32_t payload_length)
 void adapter_init(void)
 {
     /* Initialize planned packets. */
-    planpacket_init();
+    sched_packet_init();
 
     /* Initialize subghz sublayer. */
     subghz_init();
@@ -497,7 +498,13 @@ void adapter_init(void)
     g_adapter.lora_config.crc_enabled = false,                       /* CRC disabled by default. */
     g_adapter.lora_config.invert_iq = false,                         /* No IQ invert */
     g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED,           /* LDRO disabled */
+    #ifdef NUCLEO_WL55
+    g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_LP;               /* Power amplifier enabled */
+    #endif
+    #ifdef LORAE5MINI
     g_adapter.lora_config.pa_mode = SUBGHZ_PA_MODE_HP;               /* Power amplifier enabled */
+    #endif
+    
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
     /* Initialize FSK adapter. */
@@ -508,7 +515,7 @@ void adapter_init(void)
     g_adapter.fsk_config.crc = false;
     g_adapter.fsk_config.payload_length = 40;
     g_adapter.fsk_config.packet_type = SUBGHZ_PKT_FIXED_LENGTH;
-    g_adapter.fsk_config.pa_mode = SUBGHZ_PA_MODE_HP;
+    g_adapter.fsk_config.pa_mode = SUBGHZ_PA_MODE_LP;
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
     /* Default mode is LoRa. */
@@ -518,12 +525,16 @@ void adapter_init(void)
     g_adapter.state = STOPPED;
     
     /* Prepared packet. */
+    #if 0
     g_sched_pkt.length = 0;
     g_sched_pkt.timestamp = 0;
+    #endif
 
     g_adapter.prepared_packet_rdy = false;
     g_adapter.pp_length = 0;
     g_adapter.pp_timestamp = 0;
+
+    gpio_set(GPIOB, GPIO11);
 }
 
 
@@ -968,50 +979,64 @@ void adapter_on_send_packet(phy_SendCmd *cmd)
         return;
     }
 
-    /* If timestamp is set (!=0), then it is a planned packet. */
-    if (cmd->timestamp > 0)
-    {
-        #if 0
-        /* Add packet to our planned packets. */
-        if (planpacket_add(cmd->timestamp, cmd->packet.bytes, cmd->packet.size))
-        {
-            /* Return success now (but send later). */
-            whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
-            whad_send_message(&cmd_result);
-        }
-        else
-        {
-            /* Failure (queue is full). */
-            whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
-            whad_send_message(&cmd_result);            
-        }
-        #endif
-        g_sched_pkt.timestamp = cmd->timestamp;
-        g_sched_pkt.length = cmd->packet.size;
-        memcpy(g_sched_pkt.packet, cmd->packet.bytes, cmd->packet.size);
 
-        /* Return success now (but send later). */
+    /* Send packet, go back to RX if timeout or when packet is successfully sent. */
+    if (subghz_send_async(cmd->packet.bytes, cmd->packet.size, 0x9c400) == SUBGHZ_SUCCESS)
+    {
+        /* Success message will be sent when the packet will be sent. */
         whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
         whad_send_message(&cmd_result);
     }
     else
     {
-        /* Send packet, go back to RX if timeout or when packet is successfully sent. */
-        if (subghz_send_async(cmd->packet.bytes, cmd->packet.size, 0x9c400) == SUBGHZ_SUCCESS)
-        {
-            /* Success message will be sent when the packet will be sent. */
-            whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
-            whad_send_message(&cmd_result);
-        }
-        else
-        {
-            /* Failure. */
-            whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
-            whad_send_message(&cmd_result);        
-        }
+        /* Failure. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+        whad_send_message(&cmd_result);        
     }
 }
 
+
+/**
+ * @brief   Handle delayed packet sending
+ * 
+ * @param   cmd     `ScheduleSendCmd` message
+ * 
+ * Send a packet using the configured PHY layer, if adapter is started.
+ */
+
+void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
+{
+    Message cmd_result;
+    int pkt_id = -1;
+
+    if (g_adapter.state != STARTED)
+    {
+        /* Error. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+        whad_send_message(&cmd_result);
+        return;
+    }
+
+    /* Add packet to our scheduled packets. */
+    pkt_id = sched_packet_add(
+        cmd->timestamp.sec,
+        cmd->timestamp.usec,
+        cmd->packet.bytes,
+        cmd->packet.size
+    );
+
+    /* Return the allocated packet id. */
+    if (pkt_id >= 0)
+    {
+        whad_phy_packet_scheduled(&cmd_result, (uint8_t)pkt_id, false);
+        whad_send_message(&cmd_result);
+    }
+    else
+    {
+        whad_phy_packet_scheduled(&cmd_result, 0, true);
+        whad_send_message(&cmd_result);
+    }
+}
 
 /**
  * Whad message processing.
@@ -1134,6 +1159,15 @@ void dispatch_message(Message *message)
                     }
                     break;
 
+                    /* Schedule packet send through configured PHY. */
+                    case phy_Message_sched_send_tag:
+                    {
+                        adapter_on_sched_send_packet(
+                            &message->msg.phy.msg.sched_send
+                        );
+                    }
+                    break;
+
                     /* Unsupported. */
                     default:
                         adapter_on_unsupported(message);
@@ -1199,59 +1233,50 @@ void dispatch_message(Message *message)
     }
 }
 
-void adapter_send_planned_packets(void)
+void adapter_send_scheduled_packets(void)
 {
-    uint32_t ts;
+    /* Send scheduled packet. */
+    subghz_send_async(g_sched_pkt.packet, g_sched_pkt.length, 0x9c400);
+    
+    //gpio_set(GPIOB, GPIO11);
+    GPIOB_BSRR |= (1 << 11); /* set B11 */
 
-    /* Check if we have a packet to send. */
-    if (!g_adapter.prepared_packet_rdy)
-    {
-        ts = sys_get_timestamp();
-        #if 0
-        if (planpacket_find(ts, g_adapter.prepared_pkt, &g_adapter.pp_length, &g_adapter.pp_timestamp))
-        {
-            //subghz_prepare_send(g_adapter.prepared_pkt, g_adapter.pp_length);
-            g_adapter.prepared_packet_rdy = true;
-        }
-        #endif
-        if (((ts + PACKET_PREPARE_TIME) >= g_sched_pkt.timestamp) && (g_sched_pkt.timestamp > 0))
-        {
-            //subghz_prepare_send(g_adapter.prepared_pkt, g_adapter.pp_length);
-            g_adapter.prepared_packet_rdy = true;
-            //g_sched_pkt.timestamp = 0;
-        }
-    }
-    #if 0
-    else if (g_adapter.pp_timestamp <= sys_get_timestamp())
-    {
-        whad_verbose("pkt sent");
+    /* Disable timer. */
+    timer_disable_oc_output(TIM2, TIM_OC1);
+    timer_clear_flag(TIM2, TIM_SR_CC1IF);
+    timer_disable_irq(TIM2, TIM_DIER_CC1IE);
 
-        /* No more pending packet */
-        g_adapter.prepared_packet_rdy = false;
-    }
-    #endif
+    /* Adapter is ready for a new scheduled packet. */
+    g_sched_pkt_rdy = false;
+    g_sched_pkt_timer_set = false;
+
+    whad_verbose("pkt sent");
 }
 
 void adapter_send_rdy(void)
 {
-    uint32_t ts = sys_get_timestamp();
-    #if 0
-    if ((g_adapter.prepared_packet_rdy) && (g_adapter.pp_timestamp <= sys_get_timestamp()) && (g_adapter.pp_timestamp > 0))
+    uint32_t ts_sec = sys_get_timestamp_sec();
+
+    /* Fetch next packet to schedule if required. */
+    if (!g_sched_pkt_rdy)
     {
-        gpio_toggle(GPIOB, GPIO11);
-
-        g_adapter.pp_timestamp = 0;
-
-        /* Send packet now. */
-        //subghz_tx(0);
-        g_adapter.prepared_packet_rdy = false;
+        g_sched_pkt_rdy = sched_get_next(&g_sched_pkt);
     }
-    #endif
-    if ((g_adapter.prepared_packet_rdy) && (ts >= g_sched_pkt.timestamp))
+
+    /* Do we have a packet to send ? */
+    if (g_sched_pkt_rdy && (!g_sched_pkt_timer_set))
     {
-        gpio_toggle(GPIOB, GPIO11);
-        subghz_send_async(g_sched_pkt.packet, g_sched_pkt.length, 0);
-        g_adapter.prepared_packet_rdy = false;
-        g_sched_pkt.timestamp = 0;
+        /* Is it time to setup a timer ? */
+        if (g_sched_pkt.ts_sec == ts_sec)
+        {
+            /* Set up a timer trigger for this packet. */
+            timer_enable_oc_output(TIM2, TIM_OC1);
+            timer_set_oc_polarity_low(TIM2, TIM_OC1);
+            timer_clear_flag(TIM2, TIM_SR_CC1IF);
+            timer_set_oc_value(TIM2, TIM_OC1, g_sched_pkt.ts_usec);
+            timer_enable_irq(TIM2, TIM_DIER_CC1IE);
+
+            g_sched_pkt_timer_set = true;
+        }
     }
 }

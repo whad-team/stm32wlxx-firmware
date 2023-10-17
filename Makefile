@@ -52,9 +52,6 @@ LD_FLAGS     += -L$(WHAD_DIR)/lib -lwhad
 LD_FLAGS     += -u _printf_float
 
 PROJECT      = main
-ADAPTER		 = adapter
-PPACKET		 = ppacket
-SYS			 = sys
 
 # tells make that these don't produce a file
 .PHONY: clean flash lib lora_e5_mini nucleo_wl55
@@ -85,21 +82,21 @@ $(DEV_LDFILE):
 %.hex: %.elf
 	$(OBJCOPY) -Oihex $< $@
 
-nucleo_wl55.elf : lib main.c adapter.c ppacket.c sys.c $(DEV_LDFILE) lora/subghz.c
+nucleo_wl55.elf : lib main.c adapter.c schedpkt.c sys.c $(DEV_LDFILE) lora/subghz.c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -DNUCLEO_WL55 -c adapter.c -o adapter.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c sys.c -o sys.o
-	$(CC) $(C_FLAGS) $(INC_FLAGS) -c ppacket.c -o ppacket.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c schedpkt.c -o schedpkt.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c lora/subghz.c -o lora/subghz.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c main.c -o main.o
-	$(CC) $(C_FLAGS) -o nucleo_wl55.elf main.o adapter.o sys.o ppacket.o lora/subghz.o $(LD_FLAGS)
+	$(CC) $(C_FLAGS) -o nucleo_wl55.elf main.o adapter.o sys.o schedpkt.o lora/subghz.o $(LD_FLAGS)
 
-lora_e5_mini.elf : lib main.c adapter.c ppacket.c sys.c $(DEV_LDFILE) lora/subghz.c
+lora_e5_mini.elf : lib main.c adapter.c schedpkt.c sys.c $(DEV_LDFILE) lora/subghz.c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -DLORAE5MINI -c adapter.c -o adapter.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c sys.c -o sys.o
-	$(CC) $(C_FLAGS) $(INC_FLAGS) -c ppacket.c -o ppacket.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c schedpkt.c -o schedpkt.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c lora/subghz.c -o lora/subghz.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c main.c -o main.o
-	$(CC) $(C_FLAGS) -o lora_e5_mini.elf main.o adapter.o sys.o ppacket.o lora/subghz.o $(LD_FLAGS)
+	$(CC) $(C_FLAGS) -o lora_e5_mini.elf main.o adapter.o sys.o schedpkt.o lora/subghz.o $(LD_FLAGS)
 
 lora/subghz.o: lora/subghz.c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o lora/subghz.o lora/subghz.c
@@ -107,8 +104,8 @@ lora/subghz.o: lora/subghz.c
 $(SYS).o: $(SYS).c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(SYS).o $(SYS).c
 
-$(PPACKET).o: $(PPACKET).c
-	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(PPACKET).o $(PPACKET).c
+$(schedpkt).o: $(schedpkt).c
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(schedpkt).o $(schedpkt).c
 	
 $(PROJECT).o : $(PROJECT).c
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c -o $(PROJECT).o $(PROJECT).c
