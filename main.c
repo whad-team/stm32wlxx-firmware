@@ -151,8 +151,8 @@ static void timer_setup(void)
   /* Set timer prescaler (Ftim2=1MHz). */
   timer_set_prescaler(TIM2, (24)-1);
 
-  /* Timer will overflow each second. */
-  timer_set_period(TIM2, (1000000)-1);
+  /* Timer will overflow each millisecond. */
+  timer_set_period(TIM2, (1000)-1);
 
   /* Stop Timer2 OC1. */
   timer_disable_oc_output(TIM2, TIM_OC1);

@@ -1829,7 +1829,7 @@ void radio_isr(void)
   if (irq_status.bits.rx_done)
   {
     //gpio_clear(GPIOB, GPIO11);
-    GPIOB_BSRR |= (1 << (11+16)); /* clear B11 */
+    //GPIOB_BSRR |= (1 << (11+16)); /* clear B11 */
 
     /* Save flag for synchronous mode. */
     g_flag_rx_done = true;

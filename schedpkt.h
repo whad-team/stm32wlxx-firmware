@@ -10,7 +10,7 @@
 
 typedef struct {
   uint8_t id;
-  uint32_t ts_sec;
+  uint32_t ts_msec;
   uint32_t ts_usec;
   uint8_t packet[PACKET_MAX_SIZE];
   int length;

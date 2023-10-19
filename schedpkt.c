@@ -17,7 +17,7 @@ void sched_packet_init(void)
     for (i=0; i<SCHED_PACKET_MAX; i++)
     {
         g_sched_pkts[i].id = i;
-        g_sched_pkts[i].ts_sec = 0;
+        g_sched_pkts[i].ts_msec = 0;
         g_sched_pkts[i].ts_usec = 0;
         g_sched_pkts[i].length = 0;
     }
@@ -33,8 +33,8 @@ int sched_packet_add(uint32_t ts_sec, uint32_t ts_usec, uint8_t *p_pkt, int leng
         if (g_sched_pkts[i].length == 0)
         {
             /* Save packet timestamp... */
-            g_sched_pkts[i].ts_sec = ts_sec;
-            g_sched_pkts[i].ts_usec = ts_usec;
+            g_sched_pkts[i].ts_msec = ts_sec*1000 + ts_usec/1000;
+            g_sched_pkts[i].ts_usec = ts_usec%1000;
 
             /* ... and content. */
             g_sched_pkts[i].length = length;
@@ -43,9 +43,9 @@ int sched_packet_add(uint32_t ts_sec, uint32_t ts_usec, uint8_t *p_pkt, int leng
             /* Update next packet to send. */
             if (g_next_sched_pkt >= 0)
             {
-                if ((g_sched_pkts[g_next_sched_pkt].ts_sec > g_sched_pkts[i].ts_sec) ||
+                if ((g_sched_pkts[g_next_sched_pkt].ts_msec > g_sched_pkts[i].ts_msec) ||
                     (
-                        (g_sched_pkts[g_next_sched_pkt].ts_sec == g_sched_pkts[i].ts_sec) &&
+                        (g_sched_pkts[g_next_sched_pkt].ts_msec == g_sched_pkts[i].ts_msec) &&
                         (g_sched_pkts[g_next_sched_pkt].ts_usec > g_sched_pkts[i].ts_usec)
                     )
                 )
@@ -79,18 +79,18 @@ void _prepare_next_pkt(void)
     for (i=0; i<SCHED_PACKET_MAX; i++)
     {
         /* If current packet timestamp is not zero and lower. */
-        if ((g_sched_pkts[i].ts_sec > 0) || (g_sched_pkts[i].ts_usec > 0))
+        if ((g_sched_pkts[i].ts_msec > 0) || (g_sched_pkts[i].ts_usec > 0))
         {
             /* If packet timestamp seconds is lower or same with usec lower,
                keep track of this packet.
             */
             if (
-                (g_sched_pkts[i].ts_sec < sec) ||
-                ((g_sched_pkts[i].ts_sec == sec) && (g_sched_pkts[i].ts_usec < usec))
+                (g_sched_pkts[i].ts_msec < sec) ||
+                ((g_sched_pkts[i].ts_msec == sec) && (g_sched_pkts[i].ts_usec < usec))
             )  
             {
                 /* Save packet info. */
-                sec = g_sched_pkts[i].ts_sec;
+                sec = g_sched_pkts[i].ts_msec;
                 usec = g_sched_pkts[i].ts_usec;
                 j = i;
             }
@@ -134,7 +134,7 @@ void sched_free_packet(uint8_t slot_id)
     {
         /* Mark slot as free. */
         g_sched_pkts[slot_id].length = 0;
-        g_sched_pkts[slot_id].ts_sec = 0;
+        g_sched_pkts[slot_id].ts_msec = 0;
         g_sched_pkts[slot_id].ts_usec = 0;
 
         /* Look for the next packet to send. */

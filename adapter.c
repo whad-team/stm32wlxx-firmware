@@ -24,7 +24,8 @@ static uint64_t g_phy_supported_commands = (
     (1 << phy_PhyCommand_SetDataRate) |
     (1 << phy_PhyCommand_Send) |
     (1 << phy_PhyCommand_Start) |
-    (1 << phy_PhyCommand_Stop)
+    (1 << phy_PhyCommand_Stop) |
+    (1 << phy_PhyCommand_ScheduleSend)
 );
 
 const phy_SupportedFrequencyRanges_FrequencyRange g_phy_supported_freq_ranges[]  = {
@@ -438,6 +439,13 @@ void adapter_enable_explicit_mode(bool enabled)
     }
 }
 
+
+void adapter_enable_invert_iq(bool enabled)
+{
+        g_adapter.lora_config.invert_iq = enabled;
+}
+
+
 void adapter_set_payload_length(uint32_t payload_length)
 {
     if (g_adapter.mode == LORA_MODE)
@@ -766,6 +774,7 @@ void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
     adapter_set_preamble_length(cmd->preamble_length);
     adapter_enable_crc(cmd->enable_crc);
     adapter_enable_explicit_mode(cmd->explicit);
+    adapter_enable_invert_iq(cmd->invert_iq);
 
     /* Success. */
     whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
@@ -1239,7 +1248,7 @@ void adapter_send_scheduled_packets(void)
     subghz_send_async(g_sched_pkt.packet, g_sched_pkt.length, 0x9c400);
     
     //gpio_set(GPIOB, GPIO11);
-    GPIOB_BSRR |= (1 << 11); /* set B11 */
+    //GPIOB_BSRR |= (1 << 11); /* set B11 */
 
     /* Disable timer. */
     timer_disable_oc_output(TIM2, TIM_OC1);
@@ -1255,7 +1264,7 @@ void adapter_send_scheduled_packets(void)
 
 void adapter_send_rdy(void)
 {
-    uint32_t ts_sec = sys_get_timestamp_sec();
+    uint32_t ts_msec = sys_get_timestamp_msec();
 
     /* Fetch next packet to schedule if required. */
     if (!g_sched_pkt_rdy)
@@ -1267,16 +1276,24 @@ void adapter_send_rdy(void)
     if (g_sched_pkt_rdy && (!g_sched_pkt_timer_set))
     {
         /* Is it time to setup a timer ? */
-        if (g_sched_pkt.ts_sec == ts_sec)
+        if (g_sched_pkt.ts_msec == ts_msec)
         {
-            /* Set up a timer trigger for this packet. */
-            timer_enable_oc_output(TIM2, TIM_OC1);
-            timer_set_oc_polarity_low(TIM2, TIM_OC1);
-            timer_clear_flag(TIM2, TIM_SR_CC1IF);
-            timer_set_oc_value(TIM2, TIM_OC1, g_sched_pkt.ts_usec);
-            timer_enable_irq(TIM2, TIM_DIER_CC1IE);
+            /* If usec <= 10, send it now. */
+            if (g_sched_pkt.ts_usec <= 10)
+            {
+                adapter_send_scheduled_packets();
+            }
+            else
+            {
+                /* Set up a timer trigger for this packet. */
+                timer_enable_oc_output(TIM2, TIM_OC1);
+                timer_set_oc_polarity_low(TIM2, TIM_OC1);
+                timer_clear_flag(TIM2, TIM_SR_CC1IF);
+                timer_set_oc_value(TIM2, TIM_OC1, g_sched_pkt.ts_usec);
+                timer_enable_irq(TIM2, TIM_DIER_CC1IE);
 
-            g_sched_pkt_timer_set = true;
+                g_sched_pkt_timer_set = true;
+            }
         }
     }
 }
