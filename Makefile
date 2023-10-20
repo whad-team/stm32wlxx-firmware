@@ -87,7 +87,7 @@ nucleo_wl55.elf : lib main.c adapter.c schedpkt.c sys.c $(DEV_LDFILE) lora/subgh
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c sys.c -o sys.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c schedpkt.c -o schedpkt.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c lora/subghz.c -o lora/subghz.o
-	$(CC) $(C_FLAGS) $(INC_FLAGS) -c main.c -o main.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -DNUCLEO_WL55 -c main.c -o main.o
 	$(CC) $(C_FLAGS) -o nucleo_wl55.elf main.o adapter.o sys.o schedpkt.o lora/subghz.o $(LD_FLAGS)
 
 lora_e5_mini.elf : lib main.c adapter.c schedpkt.c sys.c $(DEV_LDFILE) lora/subghz.c
@@ -95,7 +95,7 @@ lora_e5_mini.elf : lib main.c adapter.c schedpkt.c sys.c $(DEV_LDFILE) lora/subg
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c sys.c -o sys.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c schedpkt.c -o schedpkt.o
 	$(CC) $(C_FLAGS) $(INC_FLAGS) -c lora/subghz.c -o lora/subghz.o
-	$(CC) $(C_FLAGS) $(INC_FLAGS) -c main.c -o main.o
+	$(CC) $(C_FLAGS) $(INC_FLAGS) -DLORAE5MINI -c main.c -o main.o
 	$(CC) $(C_FLAGS) -o lora_e5_mini.elf main.o adapter.o sys.o schedpkt.o lora/subghz.o $(LD_FLAGS)
 
 lora/subghz.o: lora/subghz.c

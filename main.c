@@ -50,7 +50,14 @@
 #define HF_PA_CTRL3_PORT GPIOC
 #define HF_PA_CTRL3_PIN  GPIO5
 
-#define USART_CONSOLE USART1  /* PB6/7 , af7 */
+#ifdef NUCLEO_WL55
+    #define USART_CONSOLE LPUART1  /* PA2/3 , af8 */
+#endif
+
+#ifdef LORAE5MINI
+    #define USART_CONSOLE USART1  /* PB6/7 , af7 */
+#endif
+
 static Message message;
 
 void uart_send_buffer_sync(uint8_t *p_data, int size);
@@ -71,43 +78,6 @@ static void clock_setup_bis(void)
   RCC_CR |= RCC_CR_HSEBYP;
   rcc_osc_on(RCC_HSE);
   rcc_wait_for_osc_ready(RCC_HSE);
-
-  #if 0
-  /* Configure PLL. */
-
-  /*
-	* Set prescalers for AHB, ADC, APB1, APB2.
-	* Do this before touching the PLL (TODO: why?).
-	*/
-	rcc_set_hpre(0);
-	rcc_set_ppre1(0);
-	rcc_set_ppre2(0);
-
-  rcc_osc_off(RCC_PLL);
-  rcc_set_main_pll(
-    RCC_PLLCFGR_PLLSRC_HSE,
-    RCC_PLLCFGR_PLLM(8),
-    12,
-	  0,
-    0,
-    RCC_PLLCFGR_PLLR_DIV2
-  );
-
-	/* Enable PLL oscillator and wait for it to stabilize. */
-	rcc_osc_on(RCC_PLL);
-	rcc_wait_for_osc_ready(RCC_PLL);
-
-	/* Select PLL as SYSCLK source. */
-	rcc_set_sysclk_source(RCC_CFGR_SW_PLL);
-
-	/* Wait for PLL clock to be selected. */
-	rcc_wait_for_sysclk_status(RCC_PLL);
-
-	/* Set the peripheral clock frequencies used. */
-	rcc_ahb_frequency  = 24e6;
-	rcc_apb1_frequency = 24e6;
-	rcc_apb2_frequency = 24e6;
-  #endif
   
   struct rcc_clock_scale pll_config = {
     .pllm = 8,
@@ -168,6 +138,13 @@ static void timer_setup(void)
 
 static void usart_setup(void)
 {
+    #ifdef LORAE5MINI
+
+    /**
+     * LoRa E5 Mini (SeeedStudio) uses USART1 for its main serial
+     * communication port.
+     */
+
     /* Enable clocks for peripherals we need */
     rcc_periph_clock_enable(RCC_USART1);
 
@@ -184,7 +161,34 @@ static void usart_setup(void)
 
     /* Setup USART1 RX pin as alternate function. */
     gpio_set_af(GPIOB, GPIO_AF7, GPIO7);
+    #endif
 
+    #ifdef NUCLEO_WL55
+
+    /**
+     * NUCLEO WL55 board uses LPUART1 by default, exposed through
+     * the main USB port.
+     */
+
+    /* Enable clocks for peripherals we need */
+    rcc_periph_clock_enable(RCC_LPUART1);
+
+    /* Enable LPUART1 IRQ. */
+    nvic_set_priority(NVIC_LPUART1_IRQ, 0);
+    nvic_enable_irq(NVIC_LPUART1_IRQ);
+
+    /* Setup GPIO pins for LPUART1 transmit. */
+    gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2);
+    gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3);
+
+    /* Setup LPUART1 TX pin as alternate function. */
+    gpio_set_af(GPIOA, GPIO_AF8, GPIO2);
+
+    /* Setup LPUART1 RX pin as alternate function. */
+    gpio_set_af(GPIOA, GPIO_AF8, GPIO3);
+    #endif
+
+    /* Configure serial port. */
     usart_set_baudrate(USART_CONSOLE, 115200);
     usart_set_databits(USART_CONSOLE, 8);
     usart_set_stopbits(USART_CONSOLE, USART_STOPBITS_1);
@@ -192,10 +196,10 @@ static void usart_setup(void)
     usart_set_parity(USART_CONSOLE, USART_PARITY_NONE);
     usart_set_flow_control(USART_CONSOLE, USART_FLOWCONTROL_NONE);
 
-    /* Enable USART Receive interrupt. */
+    /* Enable serial port Receive interrupt. */
     usart_enable_rx_interrupt(USART_CONSOLE);
 
-    /* Finally enable the USART. */
+    /* Finally enable the serial port. */
     usart_enable(USART_CONSOLE);    
 }
 
@@ -234,6 +238,27 @@ void tim2_isr(void)
   }
 }
 
+#ifdef NUCLEO_WL55
+void lpuart1_isr(void)
+{
+  static uint8_t data = 'A';
+
+    /* Did we receive a byte ? */
+    if (((USART_CR1(USART_CONSOLE) & USART_CR1_RXNEIE) != 0) &&
+        ((USART_ISR(USART_CONSOLE) & USART_ISR_RXNE) != 0)) {
+
+        gpio_toggle(GPIOB, GPIO9);
+
+        /* Read byte */
+        data = usart_recv(USART_CONSOLE);
+        
+        /* Forward received byte to whad library. */
+        whad_transport_data_received(&data, 1);
+    }
+}
+#endif
+
+#ifdef LORAE5MINI
 void usart1_isr(void)
 {
   static uint8_t data = 'A';
@@ -251,20 +276,8 @@ void usart1_isr(void)
         /* Forward received byte to whad library. */
         whad_transport_data_received(&data, 1);
   }
-
-#if 0
-  /* Check if we were called because of TXE. */
-	if (((USART_CR1(USART_CONSOLE) & USART_CR1_TXEIE) != 0) &&
-	    ((USART_ISR(USART_CONSOLE) & USART_ISR_TXE) != 0)) {
-
-		/* Put data into the transmit register. */
-		usart_send(USART_CONSOLE, data);
-
-		/* Disable the TXE interrupt as we don't need it anymore. */
-		usart_disable_tx_interrupt(USART_CONSOLE);
-	}
-#endif  
 }
+#endif
 
 void uart_send_buffer_sync(uint8_t *p_data, int size)
 {
