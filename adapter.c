@@ -543,6 +543,10 @@ void adapter_init(void)
     g_adapter.pp_timestamp = 0;
 
     gpio_set(GPIOB, GPIO11);
+
+    /* Put transceiver in standby mode. */
+    subghz_lora_mode(&g_adapter.lora_config);
+    subghz_set_standby_mode(SUBGHZ_STDBY_HSE32);
 }
 
 
@@ -1017,8 +1021,22 @@ void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
 {
     Message cmd_result;
     int pkt_id = -1;
+    uint32_t ts_sec = sys_get_timestamp_sec();
+    uint32_t ts_usec = sys_get_timestamp_usec();
 
     if (g_adapter.state != STARTED)
+    {
+        /* Error. */
+        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+        whad_send_message(&cmd_result);
+        return;
+    }
+
+    /* If packet is scheduled in the past, return an error. */
+    if (
+        (cmd->timestamp.sec < ts_sec) ||
+        ((cmd->timestamp.sec == ts_sec) && (cmd->timestamp.usec <= ts_usec))
+    )
     {
         /* Error. */
         whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
@@ -1265,6 +1283,7 @@ void adapter_send_scheduled_packets(void)
 void adapter_send_rdy(void)
 {
     uint32_t ts_msec = sys_get_timestamp_msec();
+    uint32_t ts_usec = sys_get_timestamp_usec() % 1000;
 
     /* Fetch next packet to schedule if required. */
     if (!g_sched_pkt_rdy)
@@ -1294,6 +1313,17 @@ void adapter_send_rdy(void)
 
                 g_sched_pkt_timer_set = true;
             }
+        }
+        else
+        {
+            /* If packet is scheduled in the past, discard it. */
+            if (
+                (g_sched_pkt.ts_msec < ts_msec) ||
+                ((g_sched_pkt.ts_msec == ts_msec) && (g_sched_pkt.ts_usec <= ts_usec))
+            )
+            {
+                g_sched_pkt_rdy = false;
+            }   
         }
     }
 }
