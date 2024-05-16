@@ -9,7 +9,7 @@
  * Adapter WHAD capabilities and domains
  */
 
-static DeviceCapability g_adapter_cap[] = {
+static WhadDeviceCapability g_adapter_cap[] = {
     {discovery_Domain_Phy, discovery_Capability_Inject | discovery_Capability_Sniff},
     {0, 0}
 };
@@ -29,7 +29,7 @@ static uint64_t g_phy_supported_commands = (
 );
 
 const phy_SupportedFrequencyRanges_FrequencyRange g_phy_supported_freq_ranges[]  = {
-    {865000000, 915000000},
+    {150000000, 960000000},
     {0, 0}
 };
 const int g_phy_supported_ranges_nb = 1;
@@ -178,16 +178,16 @@ static void adapter_on_pkt_sent(void)
     Message cmd_result;
 
     /* Switch back to async rx mode. */
-    if (subghz_receive_async(0xFFFFFF) ==SUBGHZ_SUCCESS)
+    if (subghz_receive_async(0xFFFFFF) == SUBGHZ_SUCCESS)
     {
         /* Success. */
-        whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+        whad_generic_cmd_result(&cmd_result, WHAD_RESULT_SUCCESS);
         whad_send_message(&cmd_result);
     }
     else
     {
         /* Success. */
-        whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
+        whad_generic_cmd_result(&cmd_result, WHAD_RESULT_ERROR);
         whad_send_message(&cmd_result);
     }
 }
@@ -777,7 +777,7 @@ void adapter_on_lora_modulation(phy_SetLoRaModulationCmd *cmd)
     adapter_set_bandwidth(cmd->bandwidth);
     adapter_set_preamble_length(cmd->preamble_length);
     adapter_enable_crc(cmd->enable_crc);
-    adapter_enable_explicit_mode(cmd->explicit);
+    adapter_enable_explicit_mode(cmd->explicit_mode);
     adapter_enable_invert_iq(cmd->invert_iq);
 
     /* Success. */
