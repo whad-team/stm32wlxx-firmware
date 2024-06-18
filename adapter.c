@@ -8,31 +8,35 @@
 /**
  * Adapter WHAD capabilities and domains
  */
+#define CMD(X) (1 << (X))
 
-static WhadDeviceCapability g_adapter_cap[] = {
-    {discovery_Domain_Phy, discovery_Capability_Inject | discovery_Capability_Sniff},
-    {0, 0}
+static whad_domain_desc_t CAPABILITIES[] = {
+    {
+    DOMAIN_PHY,
+    (whad_capability_t)(CAP_SNIFF | CAP_INJECT | CAP_HIJACK | CAP_SIMULATE_ROLE),
+    (
+        CMD(phy_PhyCommand_GetSupportedFrequencies) |
+        CMD(phy_PhyCommand_SetLoRaModulation) |
+        CMD(phy_PhyCommand_SetFSKModulation) |
+        CMD(phy_PhyCommand_SetFrequency) |
+        CMD(phy_PhyCommand_SetSyncWord) |
+        CMD(phy_PhyCommand_Sniff) |
+        CMD(phy_PhyCommand_SetPacketSize) |
+        CMD(phy_PhyCommand_SetDataRate) |
+        CMD(phy_PhyCommand_Send) |
+        CMD(phy_PhyCommand_Start) |
+        CMD(phy_PhyCommand_Stop) |
+        CMD(phy_PhyCommand_ScheduleSend)
+        )
+    },
+    {DOMAIN_NONE, CAP_NONE, 0x00000000}
 };
-static uint64_t g_phy_supported_commands = (
-    (1 << phy_PhyCommand_GetSupportedFrequencies) |
-    (1 << phy_PhyCommand_SetLoRaModulation) |
-    (1 << phy_PhyCommand_SetFSKModulation) |
-    (1 << phy_PhyCommand_SetFrequency) |
-    (1 << phy_PhyCommand_SetSyncWord) |
-    (1 << phy_PhyCommand_Sniff) |
-    (1 << phy_PhyCommand_SetPacketSize) |
-    (1 << phy_PhyCommand_SetDataRate) |
-    (1 << phy_PhyCommand_Send) |
-    (1 << phy_PhyCommand_Start) |
-    (1 << phy_PhyCommand_Stop) |
-    (1 << phy_PhyCommand_ScheduleSend)
-);
 
-const phy_SupportedFrequencyRanges_FrequencyRange g_phy_supported_freq_ranges[]  = {
+static whad_phy_frequency_range_t g_phy_supported_freq_ranges[] = {
     {150000000, 960000000},
     {0, 0}
 };
-const int g_phy_supported_ranges_nb = 1;
+const int g_phy_supported_ranges_nb = 2;
 
 /**
  * RF-related callbacks.
@@ -663,7 +667,7 @@ void adapter_on_device_info_req(discovery_DeviceInfoQuery *query)
         1,
         0,
         0,
-        g_adapter_cap
+        CAPABILITIES
     );
     
     /* Send response. */
@@ -691,7 +695,7 @@ void adapter_on_domain_info_req(discovery_DeviceDomainInfoQuery *query)
             whad_discovery_domain_info_resp(
                 &reply,
                 discovery_Domain_Phy,
-                g_phy_supported_commands
+                CAPABILITIES
             );
             whad_send_message(&reply);
         }
@@ -746,7 +750,7 @@ void adapter_on_get_supported_freqs(phy_GetSupportedFrequenciesCmd *cmd)
 
     whad_phy_supported_frequencies(
         &response,
-        (phy_SupportedFrequencyRanges_FrequencyRange *)g_phy_supported_freq_ranges,
+        g_phy_supported_freq_ranges,
         g_phy_supported_ranges_nb
     );
 
@@ -1023,6 +1027,7 @@ void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
     int pkt_id = -1;
     uint32_t ts_sec = sys_get_timestamp_sec();
     uint32_t ts_usec = sys_get_timestamp_usec();
+    uint64_t ts = ts_sec*1000000 + ts_usec;
 
     if (g_adapter.state != STARTED)
     {
@@ -1033,10 +1038,7 @@ void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
     }
 
     /* If packet is scheduled in the past, return an error. */
-    if (
-        (cmd->timestamp.sec < ts_sec) ||
-        ((cmd->timestamp.sec == ts_sec) && (cmd->timestamp.usec <= ts_usec))
-    )
+    if (cmd->timestamp < ts)
     {
         /* Error. */
         whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
@@ -1046,8 +1048,8 @@ void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
 
     /* Add packet to our scheduled packets. */
     pkt_id = sched_packet_add(
-        cmd->timestamp.sec,
-        cmd->timestamp.usec,
+        cmd->timestamp/1000000,
+        cmd->timestamp%1000000,
         cmd->packet.bytes,
         cmd->packet.size
     );
@@ -1069,6 +1071,168 @@ void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
  * Whad message processing.
  **/
 
+void process_phy_message(Message *message)
+{
+    whad_phy_msgtype_t msg_type = whad_phy_get_message_type(message);
+
+    switch(msg_type)
+    {
+        /* List supported frequency ranges. */
+        case WHAD_PHY_GET_SUPPORTED_FREQS:
+        {
+            adapter_on_get_supported_freqs(
+                &message->msg.phy.msg.get_supported_freq
+            );
+        }
+        break;
+
+        /* Configure adapter for LoRa modulation. */
+        case WHAD_PHY_SET_LORA_MOD:
+        {
+            adapter_on_lora_modulation(
+                &message->msg.phy.msg.mod_lora
+            );
+        }
+        break;
+
+        /* Configure adapter for FSK modulation. */
+        case WHAD_PHY_SET_FSK_MOD:
+        {
+            adapter_on_fsk_modulation(
+                &message->msg.phy.msg.mod_fsk
+            );
+        }
+        break;
+
+        /* Set adapter frequency. */
+        case WHAD_PHY_SET_FREQ:
+        {
+            adapter_on_set_freq(
+                &message->msg.phy.msg.set_freq
+            );
+        }
+        break;
+
+        /* Set adapter synchronization word. */
+        case WHAD_PHY_SET_SYNC_WORD:
+        {
+            adapter_on_sync_word(
+                &message->msg.phy.msg.sync_word
+            );
+        }
+        break;
+
+        /* Start adapter. */
+        case WHAD_PHY_START:
+        {
+            adapter_on_start(
+                &message->msg.phy.msg.start
+            );
+            
+        }
+        break;
+
+        /* Stop adapter. */
+        case WHAD_PHY_STOP:
+        {
+            adapter_on_stop(
+                &message->msg.phy.msg.stop
+            );
+        }
+        break;
+
+        /* Enable sniffer mode. */
+        case WHAD_PHY_SET_SNIFF_MODE:
+        {
+            adapter_on_sniff();
+        }
+        break;
+
+        /* Set packet size. */
+        case WHAD_PHY_SET_PACKET_SIZE:
+        {
+            adapter_on_packet_size(&message->msg.phy.msg.packet_size);
+        }
+        break;
+
+        /* Set datarate. */
+        case WHAD_PHY_SET_DATARATE:
+        {
+            adapter_on_datarate(&message->msg.phy.msg.datarate);
+        }
+        break;
+
+        /* Send packet through configured PHY. */
+        case WHAD_PHY_SEND:
+        {
+            adapter_on_send_packet(
+                &message->msg.phy.msg.send
+            );
+        }
+        break;
+
+        /* Schedule packet send through configured PHY. */
+        case WHAD_PHY_SEND_SCHED_PACKET:
+        {
+            adapter_on_sched_send_packet(
+                &message->msg.phy.msg.sched_send
+            );
+        }
+        break;
+
+        /* Unsupported. */
+        default:
+            adapter_on_unsupported(message);
+            break;
+    }
+}
+
+void process_discovery_message(Message *message)
+{
+    /* Dispatch discovery message. */
+    switch (whad_discovery_get_message_type(message))
+    {
+        /* Query device information. */
+        case WHAD_DISCOVERY_DEVICE_INFO_QUERY:
+        {
+            adapter_on_device_info_req(
+                &message->msg.discovery.msg.info_query
+            );
+        }
+        break;
+
+        /* Query device domain information. */
+        case WHAD_DISCOVERY_DOMAIN_INFO_QUERY:
+        {
+            adapter_on_domain_info_req(
+                &message->msg.discovery.msg.domain_query
+            );
+        }
+        break;
+
+        /* Request a software reset. */
+        case WHAD_DISCOVERY_DEVICE_RESET:
+        {
+            /* Send answer and reset device. */
+            adapter_on_reset();
+        }
+
+        /* Change UART speed. */
+        case WHAD_DISCOVERY_SET_SPEED:
+        {
+            adapter_on_set_speed(
+                &message->msg.discovery.msg.set_speed
+            );
+        }
+        break;
+
+        /* Other messages are not supported. */
+        default:
+            adapter_on_unsupported(message);
+            break;
+    }
+}
+
 /**
  * @brief   Handle WHAD message
  * 
@@ -1077,9 +1241,11 @@ void adapter_on_sched_send_packet(phy_ScheduleSendCmd *cmd)
 
 void dispatch_message(Message *message)
 {
-    switch (message->which_msg)
+    whad_msgtype_t msg_type = whad_get_message_type(message);
+
+    switch (msg_type)
     {
-        case Message_generic_tag:
+        case WHAD_MSGTYPE_GENERIC:
             {
                 /* Not supported for now. */
                 adapter_on_unsupported(message);
@@ -1087,168 +1253,25 @@ void dispatch_message(Message *message)
             break;
 
         /* PHY domain messages */
-
-        case Message_phy_tag:
+        case WHAD_MSGTYPE_DOMAIN:
             {
-                switch(message->msg.phy.which_msg)
+                if (whad_get_message_domain(message) == DOMAIN_PHY)
                 {
-                    /* List supported frequency ranges. */
-                    case phy_Message_get_supported_freq_tag:
-                    {
-                        adapter_on_get_supported_freqs(
-                            &message->msg.phy.msg.get_supported_freq
-                        );
-                    }
-                    break;
-
-                    /* Configure adapter for LoRa modulation. */
-                    case phy_Message_mod_lora_tag:
-                    {
-                        adapter_on_lora_modulation(
-                            &message->msg.phy.msg.mod_lora
-                        );
-                    }
-                    break;
-
-                    /* Configure adapter for FSK modulation. */
-                    case phy_Message_mod_fsk_tag:
-                    {
-                        adapter_on_fsk_modulation(
-                            &message->msg.phy.msg.mod_fsk
-                        );
-                    }
-                    break;
-
-                    /* Set adapter frequency. */
-                    case phy_Message_set_freq_tag:
-                    {
-                        adapter_on_set_freq(
-                            &message->msg.phy.msg.set_freq
-                        );
-                    }
-                    break;
-
-                    /* Set adapter synchronization word. */
-                    case phy_Message_sync_word_tag:
-                    {
-                        adapter_on_sync_word(
-                            &message->msg.phy.msg.sync_word
-                        );
-                    }
-                    break;
-
-                    /* Start adapter. */
-                    case phy_Message_start_tag:
-                    {
-                        adapter_on_start(
-                            &message->msg.phy.msg.start
-                        );
-                        
-                    }
-                    break;
-
-                    /* Stop adapter. */
-                    case phy_Message_stop_tag:
-                    {
-                        adapter_on_stop(
-                            &message->msg.phy.msg.stop
-                        );
-                    }
-                    break;
-
-                    /* Enable sniffer mode. */
-                    case phy_Message_sniff_tag:
-                    {
-                        adapter_on_sniff();
-                    }
-                    break;
-
-                    /* Set packet size. */
-                    case phy_Message_packet_size_tag:
-                    {
-                        adapter_on_packet_size(&message->msg.phy.msg.packet_size);
-                    }
-                    break;
-
-                    /* Set datarate. */
-                    case phy_Message_datarate_tag:
-                    {
-                        adapter_on_datarate(&message->msg.phy.msg.datarate);
-                    }
-                    break;
-
-                    /* Send packet through configured PHY. */
-                    case phy_Message_send_tag:
-                    {
-                        adapter_on_send_packet(
-                            &message->msg.phy.msg.send
-                        );
-                    }
-                    break;
-
-                    /* Schedule packet send through configured PHY. */
-                    case phy_Message_sched_send_tag:
-                    {
-                        adapter_on_sched_send_packet(
-                            &message->msg.phy.msg.sched_send
-                        );
-                    }
-                    break;
-
-                    /* Unsupported. */
-                    default:
-                        adapter_on_unsupported(message);
-                        break;
+                    process_phy_message(message);
+                }
+                else
+                {
+                    /* Not supported for now. */
+                    adapter_on_unsupported(message);
                 }
             }
             break;
 
 
         /* Device discovery messages. */
-        case Message_discovery_tag:
+        case WHAD_MSGTYPE_DISCOVERY:
             {
-                /* Dispatch discovery message. */
-                switch (message->msg.discovery.which_msg)
-                {
-                    /* Query device information. */
-                    case discovery_Message_info_query_tag:
-                    {
-                        adapter_on_device_info_req(
-                            &message->msg.discovery.msg.info_query
-                        );
-                    }
-                    break;
-
-                    /* Query device domain information. */
-                    case discovery_Message_domain_query_tag:
-                    {
-                        adapter_on_domain_info_req(
-                            &message->msg.discovery.msg.domain_query
-                        );
-                    }
-                    break;
-
-                    /* Request a software reset. */
-                    case discovery_Message_reset_query_tag:
-                    {
-                        /* Send answer and reset device. */
-                        adapter_on_reset();
-                    }
-
-                    /* Change UART speed. */
-                    case discovery_Message_set_speed_tag:
-                    {
-                        adapter_on_set_speed(
-                            &message->msg.discovery.msg.set_speed
-                        );
-                    }
-                    break;
-
-                    /* Other messages are not supported. */
-                    default:
-                        adapter_on_unsupported(message);
-                        break;
-                }
+                process_discovery_message(message);
             }
             break;
 
