@@ -660,7 +660,7 @@ void adapter_on_device_info_req(discovery_DeviceInfoQuery *query)
         &reply,
         discovery_DeviceType_BtleJack,
         (uint8_t *)"Stm32wl-LoRa",
-        0x0100,
+        0x0001, /* Protocol version supported by this device (1). */
         115200, /* Max speed on UART */
         FIRMWARE_AUTHOR,
         FIRMWARE_URL,
