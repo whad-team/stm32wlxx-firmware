@@ -1370,6 +1370,7 @@ int subghz_fsk_mode(subghz_fsk_config_t *p_fsk_config)
   int i;
   uint16_t syncword_addr;
   uint32_t channel;
+  uint32_t bitrate, fdev;
 
   /* Switch to FSK mode. */
   g_subghz_state.current_mode = SUBGHZ_MODE_FSK;
@@ -1380,9 +1381,13 @@ int subghz_fsk_mode(subghz_fsk_config_t *p_fsk_config)
   /* Set packet type to FSK. */
   if (SUBGHZ_CMD_FAILED(subghz_set_packet_type(SUBGHZ_PACKET_FSK)))
   {
-    printf("Set packet type failed\n");
     return SUBGHZ_ERROR;
   }
+
+  /* We need to deduce the deviation and bitrate parameters from the provided values. */
+  bitrate = (32 * 32000000)/p_fsk_config->bit_rate;
+  fdev = (p_fsk_config->freq_dev * 0x2000000) / 32000000;
+
 
   /* Configure FSK packet parameters. */
   if (SUBGHZ_CMD_FAILED(subghz_set_packet_params(p_fsk_config->preamble_length, p_fsk_config->preamble_detect,
@@ -1390,13 +1395,13 @@ int subghz_fsk_mode(subghz_fsk_config_t *p_fsk_config)
                                                  p_fsk_config->packet_type, p_fsk_config->payload_length,
                                                  p_fsk_config->crc, p_fsk_config->whitening)))
   {
-    printf("Set packet params failed\n");
     return SUBGHZ_ERROR;
   }
 
   /* Set Synchronization Word (SYNC_WORD). */
   if (p_fsk_config->sync_word_length > 0)
   {
+    /* Set syncword registers. */
     syncword_addr=SUBGHZ_GSYNCR0;
     for (i=0; i<p_fsk_config->sync_word_length; i++)
     {
@@ -1408,7 +1413,6 @@ int subghz_fsk_mode(subghz_fsk_config_t *p_fsk_config)
   SX_FREQ_TO_CHANNEL(channel, p_fsk_config->freq);
   if (SUBGHZ_CMD_FAILED(subghz_set_rf_freq(channel)))
   {
-    printf("Set RF freq failed\n");
     return SUBGHZ_ERROR;
   }
 
@@ -1418,15 +1422,13 @@ int subghz_fsk_mode(subghz_fsk_config_t *p_fsk_config)
 
   if (subghz_config_pa(p_fsk_config->pa_mode, p_fsk_config->pa_power) == SUBGHZ_ERROR)
   {
-    printf("Set PA config failed\n");
     return SUBGHZ_ERROR;
   }
 
-  /* Configure transceiver in LoRa mode. */
-  if (SUBGHZ_CMD_FAILED(subghz_set_fsk_modulation_params(p_fsk_config->bit_rate, p_fsk_config->pulse_shape,
-                                                         p_fsk_config->bandwidth, p_fsk_config->freq_dev)))
+  /* Configure transceiver in FSK mode. */
+  if (SUBGHZ_CMD_FAILED(subghz_set_fsk_modulation_params(bitrate, p_fsk_config->pulse_shape,
+                                                         p_fsk_config->bandwidth, fdev)))
   {
-    printf("Set FSK mod params failed\n");
     return SUBGHZ_ERROR;
   }
 
@@ -1721,13 +1723,13 @@ int subghz_receive(uint8_t *p_frame, uint8_t *p_length, uint32_t timeout)
       }
       else
       {
-        printf("Cannot read buffer\r\n");
+        return SUBGHZ_ERROR;
       }
     }
   }
   else
   {
-    printf("Cannot read rxbuf status\r\n");
+    return SUBGHZ_ERROR;
   }
 
   /* An error occured. */
@@ -1911,13 +1913,17 @@ int subghz_set_syncword(uint8_t *p_syncword, int length)
   else
   {
     /* Set Synchronization Word (SYNC_WORD). */
-    if (length > 0)
+    if ((length > 0) && (length <= 8))
     {
       syncword_addr=SUBGHZ_GSYNCR0;
       for (i=0; i<length; i++)
       {
         subghz_write_reg(syncword_addr--, p_syncword[i]);
       }
+    }
+    else
+    {
+        return SUBGHZ_ERROR;
     }
   }
 

@@ -13,13 +13,14 @@
 static whad_domain_desc_t CAPABILITIES[] = {
     {
     DOMAIN_PHY,
-    (whad_capability_t)(CAP_SNIFF | CAP_INJECT | CAP_HIJACK | CAP_SIMULATE_ROLE),
+    (whad_capability_t)(CAP_SNIFF | CAP_INJECT | CAP_HIJACK | CAP_SIMULATE_ROLE | CAP_NO_RAW_DATA),
     (
         CMD(phy_PhyCommand_GetSupportedFrequencies) |
         CMD(phy_PhyCommand_SetLoRaModulation) |
         CMD(phy_PhyCommand_SetFSKModulation) |
         CMD(phy_PhyCommand_SetFrequency) |
         CMD(phy_PhyCommand_SetSyncWord) |
+        CMD(phy_PhyCommand_SetEndianness) |
         CMD(phy_PhyCommand_Sniff) |
         CMD(phy_PhyCommand_SetPacketSize) |
         CMD(phy_PhyCommand_SetDataRate) |
@@ -166,7 +167,13 @@ static void adapter_on_pkt_received(uint8_t offset, uint8_t length, uint32_t ts_
             ts_sec,
             ts_usec,
             rxbuf,
-            length
+            length,
+            (g_adapter.mode == LORA_MODE)?(uint8_t *)&g_adapter.sync_word:(uint8_t *)g_adapter.fsk_config.sync_word,
+            (g_adapter.mode == LORA_MODE)?2:g_adapter.fsk_config.sync_word_length,
+            (g_adapter.mode == LORA_MODE)?0:g_adapter.fsk_config.freq_dev,
+            (g_adapter.mode == LORA_MODE)?0:g_adapter.fsk_config.bit_rate,
+            phy_Endianness_LITTLE,
+            (g_adapter.mode == LORA_MODE)?phy_Modulation_LORA:phy_Modulation_FSK
         );
         whad_send_message(&msg);
     }
@@ -302,41 +309,158 @@ void adapter_set_coding_rate(phy_LoRaCodingRate coding_rate)
 void adapter_set_bandwidth(uint32_t bandwidth)
 {
     /* TODO: handle FSK bandwidth as well ! */
-
-    switch (bandwidth)
+    if (g_adapter.mode == LORA_MODE)
     {
-        default:
-        case LORA_BW125:
-            g_adapter.lora_config.bw = SUBGHZ_LORA_BW125;
+        switch (bandwidth)
+        {
+            default:
+            case LORA_BW125:
+                g_adapter.lora_config.bw = SUBGHZ_LORA_BW125;
 
-            /* Enable LDRO if required. */
-            if ((g_adapter.lora_config.sf == SUBGHZ_LORA_SF11) || (g_adapter.lora_config.sf == SUBGHZ_LORA_SF12))
-            {
-                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
-            }
-            else
-            {
-                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
-            }
-            break;
+                /* Enable LDRO if required. */
+                if ((g_adapter.lora_config.sf == SUBGHZ_LORA_SF11) || (g_adapter.lora_config.sf == SUBGHZ_LORA_SF12))
+                {
+                    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
+                }
+                else
+                {
+                    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
+                }
+                break;
 
-        case LORA_BW250:
-            g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;
+            case LORA_BW250:
+                g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;
 
-            /* Enable LDRO if required. */
-            if (g_adapter.lora_config.sf == SUBGHZ_LORA_SF12)
-            {
-                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
-            }
-            else
-            {
-                g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
-            }            
-            break;
+                /* Enable LDRO if required. */
+                if (g_adapter.lora_config.sf == SUBGHZ_LORA_SF12)
+                {
+                    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_ENABLED;
+                }
+                else
+                {
+                    g_adapter.lora_config.ldro = SUBGHZ_LORA_LDRO_DISABLED;
+                }            
+                break;
 
-        case LORA_BW500:
-            g_adapter.lora_config.bw = SUBGHZ_LORA_BW500;
-            break;
+            case LORA_BW500:
+                g_adapter.lora_config.bw = SUBGHZ_LORA_BW500;
+                break;
+        }
+    }
+    else
+    {
+        /* For FSK bandwidth, we need to find the most suitable setting based
+           on the requested bandwidth. Based on documentation, we defined the
+           following bandwith range associated with the corresponding bandwidth
+           setting:
+
+           - below 4.5 kHz -> 4.8 kHz
+           - 4.5 kHz to 5.3 kHz -> 4.8 kHz
+           - 5.3 kHz to 6.6 kHz -> 5.8 kHz
+           - 6.6 kHz to 8.5 kHz -> 7.3 kHz
+           - 8.5 kHz to 10.7 kHz -> 9.7 kHz
+           - 10.7 kHz to 13.1 kHz -> 11.7 kHz
+           - 13.1 kHz to 17.0 kHz -> 14.6 kHz
+           - 17.0 kHz to 21.4 kHz -> 19.5 kHz
+           - 21.4 kHz to 26.3 kHz -> 23.4 kHz
+           - 26.3 kHz to 34.1 kHz -> 29.3 kHz
+           - 34.1 kHz to 42.9 kHz -> 39.0 kHz
+           - 42.9 kHz to 52.7 kHz -> 46.9 kHz
+           - 52.7 kHz to 68.4 kHz -> 58.6 kHz
+           - 68.4 kHz to 86.0 kHz -> 78.2 kHz 
+           - 86.0 kHz to 105.5kHz -> 93.8 kHz
+           - 105.0 kHz to 136.7 kHz -> 117.3 kHz
+           - 136.7 kHz to 171.7 kHz -> 156.2 kHz
+           - 171.7 kHz to 210.7 kHz -> 187.2 kHz
+           - 210.7 kHz to 273.1 kHz -> 234.3 kHz
+           - 273.1 kHz to 342.8 kHz -> 312.0 kHz
+           - 342.8 kHz to 420.3 kHz -> 373.6 kHz
+           - 420.3 kHz and beyond -> 467.0 kHz
+        */
+        if (bandwidth < 5300)
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW4;
+        }
+        else if ((bandwidth >= 5300) && (bandwidth < 6600))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW5;
+        }
+        else if ((bandwidth >= 6600) && (bandwidth < 8500))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW7;
+        }
+        else if ((bandwidth >= 8500) && (bandwidth < 10700))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW9;
+        }
+        else if ((bandwidth >= 10700) && (bandwidth < 13100))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW11;
+        }
+        else if ((bandwidth >= 13100) && (bandwidth < 17000))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW14;
+        }
+        else if ((bandwidth >= 17000) && (bandwidth < 21400))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW19;
+        }
+        else if ((bandwidth >= 21400) && (bandwidth < 26300))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW23;
+        }
+        else if ((bandwidth >= 26300) && (bandwidth < 34100))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW29;
+        }
+        else if ((bandwidth >= 34100) && (bandwidth < 42900))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW39;
+        }
+        else if ((bandwidth >= 42900) && (bandwidth < 52700))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW46;
+        }
+        else if ((bandwidth >= 52700) && (bandwidth < 68400))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW58;
+        }
+        else if ((bandwidth >= 68400) && (bandwidth < 86000))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW78;
+        }
+        else if ((bandwidth >= 86000) && (bandwidth < 105500))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW93;
+        }
+        else if ((bandwidth >= 105500) && (bandwidth < 136700))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW117;
+        }
+        else if ((bandwidth >= 136700) && (bandwidth < 171700))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW156;
+        }
+        else if ((bandwidth >= 171700) && (bandwidth < 210700))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW187;
+        }
+        else if ((bandwidth >= 210700) && (bandwidth < 273100))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW234;
+        }
+        else if ((bandwidth >= 273100) && (bandwidth < 342800))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW312;
+        }
+        else if ((bandwidth >= 342800) && (bandwidth < 420300))
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW373;
+        }
+        else
+        {
+            g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW467;
+        }
     }
 }
 
@@ -565,6 +689,7 @@ int adapter_start(void)
         /* Set transceiver in LoRa mode. */
         if (subghz_lora_mode(&g_adapter.lora_config) == SUBGHZ_ERROR)
         {
+            whad_verbose("cannot configure lora: error");
             return 1;
         }
     }
@@ -573,6 +698,7 @@ int adapter_start(void)
         /* Set transceiver in FSK mode. */
         if (subghz_fsk_mode(&g_adapter.fsk_config) == SUBGHZ_ERROR)
         {
+            whad_verbose("cannot configure fsk: error");
             return 1;
         }
     }
@@ -586,6 +712,8 @@ int adapter_start(void)
 
     /* Mark adapter as started. */
     g_adapter.state = STARTED;
+
+    whad_verbose("rf in rx");
 
     return 0;
 }
@@ -660,13 +788,13 @@ void adapter_on_device_info_req(discovery_DeviceInfoQuery *query)
         &reply,
         discovery_DeviceType_BtleJack,
         (uint8_t *)"Stm32wl-LoRa",
-        0x0001, /* Protocol version supported by this device (1). */
+        0x0002, /* Protocol version supported by this device (2). */
         115200, /* Max speed on UART */
         FIRMWARE_AUTHOR,
         FIRMWARE_URL,
         1,
         0,
-        0,
+        1,
         CAPABILITIES
     );
     
@@ -808,9 +936,13 @@ void adapter_on_fsk_modulation(phy_SetFSKModulationCmd *cmd)
     g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW11;
     g_adapter.fsk_config.addr_comp = SUBGHZ_ADDR_COMP_DISABLED;
 
-    /* TODO: add support for bandwidth, bitrate, */
+    /* Reset sync word, disable CRC and enabled packet fixed length. */
+    g_adapter.fsk_config.sync_word_length = 0;
+    g_adapter.fsk_config.crc = SUBGHZ_PKT_CRC_NONE;
+    g_adapter.fsk_config.packet_type = SUBGHZ_PKT_FIXED_LENGTH;
+    g_adapter.fsk_config.payload_length = 32;
 
-    /* Switch adapter into LoRa mode. */
+    /* Switch adapter into FSK mode. */
     g_adapter.mode = FSK_MODE;
 
     /* Success. */
@@ -850,6 +982,33 @@ void adapter_on_sync_word(phy_SetSyncWordCmd *cmd)
 {
     Message cmd_result;
 
+    /* If mode is FSK, save syncword length in packet properties. */
+    if (g_adapter.mode == FSK_MODE)
+    {
+        /* Check that syncword size does not exceed 8 bytes. */
+        if (cmd->sync_word.size > 8)
+        {
+            whad_generic_cmd_result(&cmd_result, WHAD_RESULT_PARAMETER_ERROR);
+            whad_send_message(&cmd_result);
+            return;
+        }
+
+        /* Save syncword length. */
+        g_adapter.fsk_config.sync_word_length = cmd->sync_word.size;
+    }
+    else
+    {
+        /* TODO: normally LoRa syncword is on a single byte, these two bytes
+           are specific to the STM32WL55... */
+        if (cmd->sync_word.size != 2)
+        {
+            whad_generic_cmd_result(&cmd_result, WHAD_RESULT_PARAMETER_ERROR);
+            whad_send_message(&cmd_result);
+            return;            
+        }
+    }
+
+    /* Set the transceiver registers accordingly. */
     if (subghz_set_syncword(cmd->sync_word.bytes, cmd->sync_word.size) == SUBGHZ_SUCCESS)
     {
         /* Success. */
@@ -862,7 +1021,6 @@ void adapter_on_sync_word(phy_SetSyncWordCmd *cmd)
         whad_generic_cmd_result(&cmd_result, generic_ResultCode_ERROR);
         whad_send_message(&cmd_result);
     }
-
 }
 
 
@@ -923,6 +1081,8 @@ void adapter_on_sniff(void)
 {
     Message cmd_result;
 
+    adapter_start();
+
     /* Success. */
     whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
     whad_send_message(&cmd_result);
@@ -974,6 +1134,24 @@ void adapter_on_datarate(phy_SetDataRateCmd *cmd)
     whad_send_message(&cmd_result);
 }
 
+/**
+ * @brief   Handle adapter endianness modification
+ * 
+ * Again, we don't do endianness with the STM32WLxx series, but
+ * as it is required by the host for FSK modulations just let
+ * it believe that everything went ok.
+ * 
+ * @param   endian: endianness
+ */
+
+void adapter_on_endianness(phy_Endianness endian)
+{
+    Message cmd_result;
+
+    /* Success. */
+    whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
+    whad_send_message(&cmd_result);
+}
 
 
 /**
@@ -1118,6 +1296,15 @@ void process_phy_message(Message *message)
         {
             adapter_on_sync_word(
                 &message->msg.phy.msg.sync_word
+            );
+        }
+        break;
+
+        /* Set adapter endianness. */
+        case WHAD_PHY_SET_ENDIANNESS:
+        {
+            adapter_on_endianness(
+                message->msg.phy.msg.endianness.endianness
             );
         }
         break;

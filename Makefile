@@ -49,7 +49,7 @@ INC_FLAGS    += -I$(OPENCM3_DIR)/include -I$(WHAD_DIR)/inc -I$(WHAD_DIR)/nanopb 
 #for the linking
 LD_FLAGS     += -L$(OPENCM3_DIR)/lib -lc -lgcc -lnosys -l$(LIBNAME) -T$(DEV_LDFILE) -nostartfiles --static
 LD_FLAGS     += -L$(WHAD_DIR)/lib -lwhad
-LD_FLAGS     += -u _printf_float
+LD_FLAGS     += -u _printf_float -specs=nano.specs -specs=nosys.specs
 
 PROJECT      = main
 
