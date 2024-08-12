@@ -624,6 +624,7 @@ void adapter_init(void)
     subghz_set_buffer_base_address(0, 0);
 
     /* Initialize LoRa adapter. */
+    memset(&g_adapter.lora_config, 0, sizeof(g_adapter.lora_config));
     g_adapter.lora_config.freq = 865200000;
     g_adapter.lora_config.sf = SUBGHZ_LORA_SF7;                      /* Default spreading factor: SF7 */
     g_adapter.lora_config.bw = SUBGHZ_LORA_BW250;                    /* Default bandwidth: 250kHz */
@@ -644,6 +645,7 @@ void adapter_init(void)
     g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
 
     /* Initialize FSK adapter. */
+    memset(&g_adapter.fsk_config, 0, sizeof(g_adapter.fsk_config));
     g_adapter.fsk_config.freq = 868000000;
     g_adapter.fsk_config.bandwidth = SUBGHZ_FSK_BW11;
     g_adapter.fsk_config.freq_dev = 50000;
@@ -652,7 +654,10 @@ void adapter_init(void)
     g_adapter.fsk_config.payload_length = 40;
     g_adapter.fsk_config.packet_type = SUBGHZ_PKT_FIXED_LENGTH;
     g_adapter.fsk_config.pa_mode = SUBGHZ_PA_MODE_LP;
-    g_adapter.lora_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
+    g_adapter.fsk_config.pa_power = SUBGHZ_PA_PWR_14DBM;            /* TX 14 dBm */
+    g_adapter.fsk_config.addr_comp = SUBGHZ_ADDR_COMP_DISABLED;
+    g_adapter.fsk_config.pulse_shape = SUBGHZ_FSK_GAUSSIAN_NONE;
+    g_adapter.fsk_config.whitening = false;
 
     /* Default mode is LoRa. */
     g_adapter.mode = LORA_MODE;
