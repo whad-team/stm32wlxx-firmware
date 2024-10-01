@@ -30,7 +30,7 @@ int subghz_wait_on_busy(void);
 
 /* Default callbacks */
 void subghz_on_packet_sent_def_cb(void);
-void subghz_on_packet_recvd_def_cb(uint8_t offset, uint8_t length);
+void subghz_on_packet_recvd_def_cb(uint8_t offset, uint8_t length, uint32_t ts_sec, uint32_t ts_usec);
 void subghz_on_timeout_def_cb(void);
 void subghz_on_preamble_def_cb(void);
 void subghz_on_rf_switch_def_cb(bool tx);
@@ -1776,7 +1776,7 @@ void subghz_on_packet_sent_def_cb(void)
 {
 }
 
-void subghz_on_packet_recvd_def_cb(uint8_t offset, uint8_t length)
+void subghz_on_packet_recvd_def_cb(uint8_t offset, uint8_t length, uint32_t ts_sec, uint32_t ts_usec)
 {
 }
 

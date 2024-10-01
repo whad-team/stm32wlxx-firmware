@@ -43,13 +43,6 @@
 #define LED_RED_PORT GPIOB
 #define LED_RED_PIN GPIO11
 
-#define HF_PA_CTRL1_PORT GPIOC
-#define HF_PA_CTRL1_PIN  GPIO3
-#define HF_PA_CTRL2_PORT GPIOC
-#define HF_PA_CTRL2_PIN  GPIO4
-#define HF_PA_CTRL3_PORT GPIOC
-#define HF_PA_CTRL3_PIN  GPIO5
-
 #ifdef NUCLEO_WL55
     #define USART_CONSOLE LPUART1  /* PA2/3 , af8 */
 #endif

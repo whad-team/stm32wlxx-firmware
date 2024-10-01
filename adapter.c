@@ -986,6 +986,9 @@ void adapter_on_set_freq(phy_SetFrequencyCmd *cmd)
 void adapter_on_sync_word(phy_SetSyncWordCmd *cmd)
 {
     Message cmd_result;
+    uint8_t *psw = NULL;
+    uint8_t sw_length = 0;
+    uint8_t lora_sw[2];
 
     /* If mode is FSK, save syncword length in packet properties. */
     if (g_adapter.mode == FSK_MODE)
@@ -1000,21 +1003,28 @@ void adapter_on_sync_word(phy_SetSyncWordCmd *cmd)
 
         /* Save syncword length. */
         g_adapter.fsk_config.sync_word_length = cmd->sync_word.size;
+        psw = cmd->sync_word.bytes;
+        sw_length = cmd->sync_word.size;
     }
     else
     {
-        /* TODO: normally LoRa syncword is on a single byte, these two bytes
-           are specific to the STM32WL55... */
-        if (cmd->sync_word.size != 2)
+        /* We expect a single byte. */
+        if (cmd->sync_word.size != 1)
         {
             whad_generic_cmd_result(&cmd_result, WHAD_RESULT_PARAMETER_ERROR);
             whad_send_message(&cmd_result);
             return;            
         }
+
+        /* Derive the expected syncword for STM32WLxx. */
+        lora_sw[0] = (cmd->sync_word.bytes[0] & 0x0F)<<4 | 0x04;
+        lora_sw[1] = (cmd->sync_word.bytes[0] & 0xF0) | 0x04;
+        psw = lora_sw;
+        sw_length = 2;
     }
 
     /* Set the transceiver registers accordingly. */
-    if (subghz_set_syncword(cmd->sync_word.bytes, cmd->sync_word.size) == SUBGHZ_SUCCESS)
+    if (subghz_set_syncword(psw, sw_length) == SUBGHZ_SUCCESS)
     {
         /* Success. */
         whad_generic_cmd_result(&cmd_result, generic_ResultCode_SUCCESS);
